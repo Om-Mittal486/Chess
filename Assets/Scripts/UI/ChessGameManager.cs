@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.UI;
+using System.Collections.Generic;
 
 public class ChessGameManager : MonoBehaviour
 {
@@ -28,16 +29,16 @@ public class ChessGameManager : MonoBehaviour
     // Currently selected piece
     private int selectedSquare = -1;
 
+    private Dictionary<int, PieceView> pieceViews = new Dictionary<int, PieceView>();
+
     private void Start()
     {
-        // Create the chess board data
         board = new Board();
-
-        // Put all 32 pieces in their starting positions
         board.SetStartingPosition();
 
-        // Display the pieces in Unity
         SpawnPieces();
+
+        TestKnightMoves(1);
     }
 
     private void SpawnPieces()
@@ -70,6 +71,8 @@ public class ChessGameManager : MonoBehaviour
             pieceView.SetSquare(square);
             pieceView.SetGameManager(this);
 
+            pieceViews.Add(square, pieceView);
+
             // Make the piece clickable
             Button button =
                 pieceObject.GetComponent<Button>();
@@ -99,16 +102,55 @@ public class ChessGameManager : MonoBehaviour
     // Called when the player clicks a destination square
     public void SelectDestination(int square)
     {
-        // No piece selected
         if (selectedSquare == -1)
             return;
 
+        Piece selectedPiece =
+            board.GetPiece(selectedSquare);
+
+        // Check whether the requested move is legal
+        if (!IsLegalMove(selectedSquare, square))
+        {
+            Debug.Log(
+                "Illegal move: " +
+                GetSquareName(selectedSquare) +
+                " → " +
+                GetSquareName(square)
+            );
+
+            return;
+        }
+
         Debug.Log(
-            "Attempting move: " +
+            "Legal move: " +
             GetSquareName(selectedSquare) +
             " → " +
             GetSquareName(square)
         );
+
+        Move move =
+            new Move(selectedSquare, square);
+
+        // Update the internal board
+        board.MakeMove(move);
+
+        // Move visual piece
+        PieceView pieceView =
+            pieceViews[selectedSquare];
+
+        pieceView.MoveTo(
+            GetPosition(square)
+        );
+
+        // Update dictionary
+        pieceViews.Remove(selectedSquare);
+        pieceViews[square] = pieceView;
+
+        // Update PieceView
+        pieceView.SetSquare(square);
+
+        // Clear selection
+        selectedSquare = -1;
     }
 
     // Returns the correct sprite for a piece
@@ -199,5 +241,61 @@ public class ChessGameManager : MonoBehaviour
             (char)('a' + file);
 
         return $"{fileLetter}{rank + 1}";
+    }
+
+    public void SelectDestinationOrSelectPiece(int square)
+    {
+        // Nothing selected yet → select this piece
+        if (selectedSquare == -1)
+        {
+            SelectPiece(square);
+            return;
+        }
+
+        // Something is already selected.
+        // Treat this clicked piece as the destination for now.
+        SelectDestination(square);
+    }
+
+    private void TestKnightMoves(int square)
+    {
+        List<Move> moves =
+            MoveGenerator.GenerateKnightMoves(
+                board,
+                square
+            );
+
+        Debug.Log(
+            "Knight moves from " +
+            GetSquareName(square)
+        );
+
+        foreach (Move move in moves)
+        {
+            Debug.Log(
+                GetSquareName(move.From) +
+                " → " +
+                GetSquareName(move.To)
+            );
+        }
+    }
+
+    private bool IsLegalMove(int from, int to)
+    {
+        List<Move> moves =
+            MoveGenerator.GenerateMoves(
+                board,
+                from
+            );
+
+
+        foreach(Move move in moves)
+        {
+            if(move.To == to)
+                return true;
+        }
+
+
+        return false;
     }
 }

@@ -67,4 +67,12 @@ public class Board
             );
         }
     }
+
+    public void MakeMove(Move move)
+    {
+        squares[move.To] = squares[move.From];
+
+        squares[move.From] =
+            new Piece(PieceType.None, PieceColor.White);
+    }
 }
