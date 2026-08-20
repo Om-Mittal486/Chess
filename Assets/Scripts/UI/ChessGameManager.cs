@@ -35,6 +35,17 @@ public class ChessGameManager : MonoBehaviour
 
     private Dictionary<int, PieceView> pieceViews = new Dictionary<int, PieceView>();
 
+    private Dictionary<int, SquareView> squareViews = new Dictionary<int, SquareView>();
+
+    private bool whiteKingMoved = false;
+    private bool blackKingMoved = false;
+
+    private bool whiteKingsideRookMoved = false;
+    private bool whiteQueensideRookMoved = false;
+
+    private bool blackKingsideRookMoved = false;
+    private bool blackQueensideRookMoved = false;
+
     private void Start()
     {
         board = new Board();
@@ -117,6 +128,8 @@ public class ChessGameManager : MonoBehaviour
             "Selected: " +
             GetSquareName(square)
         );
+
+        ShowLegalMoves(square);
     }
 
     // Called when the player clicks a destination square
@@ -133,6 +146,7 @@ public class ChessGameManager : MonoBehaviour
         if (movingPiece.color != currentTurn)
         {
             selectedSquare = -1;
+            ClearMoveHints();
             return;
         }
 
@@ -156,14 +170,61 @@ public class ChessGameManager : MonoBehaviour
             GetSquareName(square)
         );
 
+        MoveType moveType = MoveType.Normal;
+
+        if (movingPiece.type == PieceType.King &&
+            Mathf.Abs(square - selectedSquare) == 2)
+        {
+            if (square > selectedSquare)
+            {
+                moveType = MoveType.CastleKingSide;
+            }
+            else
+            {
+                moveType = MoveType.CastleQueenSide;
+            }
+        }
+
         Move move =
-            new Move(selectedSquare, square);
+            new Move(
+                selectedSquare,
+                square,
+                moveType
+            );
 
         // Handle capture
-        HandleCapture(square);
+        if (move.Type != MoveType.CastleKingSide &&
+            move.Type != MoveType.CastleQueenSide)
+        {
+            HandleCapture(square);
+        }
 
         // Update internal board
         board.MakeMove(move);
+
+        // Update king/rook movement rights
+        UpdateMovementRights(
+            selectedSquare,
+            movingPiece
+        );
+
+        // Handle castling rook movement
+        if (move.Type == MoveType.CastleKingSide)
+        {
+            PerformCastle(
+                selectedSquare,
+                square,
+                true
+            );
+        }
+        else if (move.Type == MoveType.CastleQueenSide)
+        {
+            PerformCastle(
+                selectedSquare,
+                square,
+                false
+            );
+        }
 
         // Move visual piece
         PieceView pieceView =
@@ -179,6 +240,9 @@ public class ChessGameManager : MonoBehaviour
 
         // Update PieceView
         pieceView.SetSquare(square);
+
+        // Clear move suggestions
+        ClearMoveHints();
 
         // Clear selection
         selectedSquare = -1;
@@ -279,16 +343,20 @@ public class ChessGameManager : MonoBehaviour
 
     public void SelectDestinationOrSelectPiece(int square)
     {
-        Piece clickedPiece = board.GetPiece(square);
+        Piece clickedPiece =
+            board.GetPiece(square);
 
+        // Nothing selected
         if (selectedSquare == -1)
         {
             SelectPiece(square);
             return;
         }
 
-        Piece selectedPiece = board.GetPiece(selectedSquare);
+        Piece selectedPiece =
+            board.GetPiece(selectedSquare);
 
+        // Clicked another friendly piece
         if (!clickedPiece.IsEmpty() &&
             clickedPiece.color == selectedPiece.color)
         {
@@ -296,6 +364,7 @@ public class ChessGameManager : MonoBehaviour
             return;
         }
 
+        // Otherwise, treat it as a destination
         SelectDestination(square);
     }
 
@@ -432,16 +501,30 @@ public class ChessGameManager : MonoBehaviour
         if (movingPiece.IsEmpty())
             return false;
 
+        // -------------------------------------------------
+        // CASTLING
+        // -------------------------------------------------
 
-        // Generate the piece's movement possibilities
+        if (movingPiece.type == PieceType.King &&
+            Mathf.Abs(to - from) == 2)
+        {
+            return IsCastlingLegal(
+                from,
+                to,
+                movingPiece.color
+            );
+        }
+
+        // -------------------------------------------------
+        // NORMAL MOVES
+        // -------------------------------------------------
+
         List<Move> moves =
             MoveGenerator.GenerateMoves(
                 board,
                 from
             );
 
-
-        // Check whether destination is a possible move
         bool pseudoLegal = false;
 
         foreach (Move move in moves)
@@ -453,29 +536,25 @@ public class ChessGameManager : MonoBehaviour
             }
         }
 
-
         if (!pseudoLegal)
             return false;
 
-
         // Create temporary board
-        Board testBoard = board.Copy();
+        Board testBoard =
+            board.Copy();
 
-
-        // Apply the move to the temporary board
+        // Apply move
         testBoard.MakeMove(
             new Move(from, to)
         );
 
-
-        // Check whether our King is now attacked
+        // Make sure our own King isn't left in check
         if (IsKingInCheck(
             testBoard,
             movingPiece.color))
         {
             return false;
         }
-
 
         return true;
     }
@@ -540,5 +619,243 @@ public class ChessGameManager : MonoBehaviour
         }
 
         return GameState.Playing;
+    }
+
+    public void RegisterSquareView(
+        int square,
+        SquareView squareView
+    )
+    {
+        squareViews[square] = squareView;
+    }
+
+    private void ClearMoveHints()
+    {
+        foreach (SquareView squareView in squareViews.Values)
+        {
+            squareView.HideMoveHint();
+        }
+    }
+
+    private void ShowLegalMoves(int from)
+    {
+        ClearMoveHints();
+
+        List<Move> moves =
+            MoveGenerator.GenerateMoves(
+                board,
+                from
+            );
+
+        foreach (Move move in moves)
+        {
+            if (IsMoveLegal(
+                move.From,
+                move.To))
+            {
+                if (squareViews.TryGetValue(
+                    move.To,
+                    out SquareView squareView))
+                {
+                    squareView.ShowMoveHint();
+                }
+            }
+        }
+    }
+
+    private bool IsCastlingLegal(
+        int from,
+        int to,
+        PieceColor color)
+    {
+        bool kingside = to > from;
+
+        bool kingMoved =
+            color == PieceColor.White
+                ? whiteKingMoved
+                : blackKingMoved;
+
+        bool rookMoved;
+
+        if (color == PieceColor.White)
+        {
+            rookMoved = kingside
+                ? whiteKingsideRookMoved
+                : whiteQueensideRookMoved;
+        }
+        else
+        {
+            rookMoved = kingside
+                ? blackKingsideRookMoved
+                : blackQueensideRookMoved;
+        }
+
+        // King or required rook already moved
+        if (kingMoved || rookMoved)
+            return false;
+
+        // King must currently be on its starting square
+        int expectedKingSquare =
+            color == PieceColor.White ? 4 : 60;
+
+        if (from != expectedKingSquare)
+            return false;
+
+        // King must currently exist there
+        Piece king =
+            board.GetPiece(from);
+
+        if (king.type != PieceType.King ||
+            king.color != color)
+        {
+            return false;
+        }
+
+        // King cannot castle while in check
+        if (IsKingInCheck(color))
+            return false;
+
+        // Determine squares
+        int direction =
+            kingside ? 1 : -1;
+
+        int middleSquare =
+            from + direction;
+
+        // King cannot pass through an attacked square
+        if (AttackDetector.IsSquareAttacked(
+            board,
+            middleSquare,
+            GetOpponentColor(color)))
+        {
+            return false;
+        }
+
+        // King cannot land on an attacked square
+        if (AttackDetector.IsSquareAttacked(
+            board,
+            to,
+            GetOpponentColor(color)))
+        {
+            return false;
+        }
+
+        // Make sure the correct rook exists
+        int rookSquare =
+            kingside
+                ? from + 3
+                : from - 4;
+
+        Piece rook =
+            board.GetPiece(rookSquare);
+
+        if (rook.type != PieceType.Rook ||
+            rook.color != color)
+        {
+            return false;
+        }
+
+        // Make sure the squares between King and Rook are empty
+        if (kingside)
+        {
+            if (!board.GetPiece(from + 1).IsEmpty() ||
+                !board.GetPiece(from + 2).IsEmpty())
+            {
+                return false;
+            }
+        }
+        else
+        {
+            if (!board.GetPiece(from - 1).IsEmpty() ||
+                !board.GetPiece(from - 2).IsEmpty() ||
+                !board.GetPiece(from - 3).IsEmpty())
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private PieceColor GetOpponentColor(
+        PieceColor color)
+    {
+        return color == PieceColor.White
+            ? PieceColor.Black
+            : PieceColor.White;
+    }
+
+    private void PerformCastle(
+        int kingFrom,
+        int kingTo,
+        bool kingside)
+    {
+        int rookFrom;
+        int rookTo;
+
+        if (kingTo > kingFrom)
+        {
+            // Kingside
+            rookFrom = kingFrom + 3;
+            rookTo = kingFrom + 1;
+        }
+        else
+        {
+            // Queenside
+            rookFrom = kingFrom - 4;
+            rookTo = kingFrom - 1;
+        }
+
+        PieceView rookView =
+            pieceViews[rookFrom];
+
+        rookView.MoveTo(
+            GetPosition(rookTo)
+        );
+
+        pieceViews.Remove(rookFrom);
+        pieceViews[rookTo] = rookView;
+
+        rookView.SetSquare(rookTo);
+
+        board.MakeMove(
+            new Move(
+                rookFrom,
+                rookTo
+            )
+        );
+    }
+
+    private void UpdateMovementRights(
+        int from,
+        Piece piece)
+    {
+        if (piece.type == PieceType.King)
+        {
+            if (piece.color == PieceColor.White)
+                whiteKingMoved = true;
+            else
+                blackKingMoved = true;
+        }
+
+        if (piece.type == PieceType.Rook)
+        {
+            if (piece.color == PieceColor.White)
+            {
+                if (from == 0)
+                    whiteQueensideRookMoved = true;
+
+                if (from == 7)
+                    whiteKingsideRookMoved = true;
+            }
+            else
+            {
+                if (from == 56)
+                    blackQueensideRookMoved = true;
+
+                if (from == 63)
+                    blackKingsideRookMoved = true;
+            }
+        }
     }
 }

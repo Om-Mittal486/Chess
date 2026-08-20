@@ -32,6 +32,11 @@ public class BoardView : MonoBehaviour
                     gameManager
                 );
 
+                gameManager.RegisterSquareView(
+                    rank * 8 + file,
+                    squareView
+                );
+
                 Image image =
                     square.GetComponent<Image>();
 

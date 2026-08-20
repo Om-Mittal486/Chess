@@ -386,53 +386,173 @@ public static class MoveGenerator
         int square
     )
     {
+        List<Move> moves = new List<Move>();
+
         Piece piece = board.GetPiece(square);
 
-        if(piece.IsEmpty())
+        if (piece.IsEmpty())
         {
-            return new List<Move>();
+            return moves;
         }
 
         switch (piece.type)
         {
             case PieceType.Pawn:
-                return GeneratePawnMoves(
-                    board,
-                    square
+                moves.AddRange(
+                    GeneratePawnMoves(
+                        board,
+                        square
+                    )
                 );
+                break;
 
             case PieceType.Knight:
-                return GenerateKnightMoves(
-                    board,
-                    square
+                moves.AddRange(
+                    GenerateKnightMoves(
+                        board,
+                        square
+                    )
                 );
+                break;
 
             case PieceType.Bishop:
-                return GenerateBishopMoves(
-                    board,
-                    square
+                moves.AddRange(
+                    GenerateBishopMoves(
+                        board,
+                        square
+                    )
                 );
+                break;
 
             case PieceType.Rook:
-                return GenerateRookMoves(
-                    board,
-                    square
+                moves.AddRange(
+                    GenerateRookMoves(
+                        board,
+                        square
+                    )
                 );
+                break;
 
             case PieceType.Queen:
-                return GenerateQueenMoves(
-                    board,
-                    square
+                moves.AddRange(
+                    GenerateQueenMoves(
+                        board,
+                        square
+                    )
                 );
+                break;
 
             case PieceType.King:
-                return GenerateKingMoves(
-                    board,
-                    square
+                moves.AddRange(
+                    GenerateKingMoves(
+                        board,
+                        square
+                    )
                 );
-
-            default:
-                return new List<Move>();
+                break;
         }
+
+        return moves;
+    }
+
+    public static List<Move> GenerateCastlingMoves(
+        Board board,
+        PieceColor color,
+        bool kingMoved,
+        bool kingsideRookMoved,
+        bool queensideRookMoved)
+    {
+        List<Move> moves = new List<Move>();
+
+        if (kingMoved)
+            return moves;
+
+        int kingSquare;
+        int kingsideRookSquare;
+        int queensideRookSquare;
+
+        if (color == PieceColor.White)
+        {
+            kingSquare = 4;              // e1
+            kingsideRookSquare = 7;      // h1
+            queensideRookSquare = 0;     // a1
+        }
+        else
+        {
+            kingSquare = 60;             // e8
+            kingsideRookSquare = 63;     // h8
+            queensideRookSquare = 56;    // a8
+        }
+
+        // Make sure king is actually there
+        Piece king = board.GetPiece(kingSquare);
+
+        if (king.type != PieceType.King ||
+            king.color != color)
+        {
+            return moves;
+        }
+
+        // -----------------------------
+        // KING SIDE
+        // -----------------------------
+
+        if (!kingsideRookMoved)
+        {
+            Piece rook =
+                board.GetPiece(kingsideRookSquare);
+
+            if (rook.type == PieceType.Rook &&
+                rook.color == color)
+            {
+                int f = kingSquare + 1;
+                int g = kingSquare + 2;
+
+                if (board.GetPiece(f).IsEmpty() &&
+                    board.GetPiece(g).IsEmpty())
+                {
+                    moves.Add(
+                        new Move(
+                            kingSquare,
+                            g,
+                            MoveType.CastleKingSide
+                        )
+                    );
+                }
+            }
+        }
+
+        // -----------------------------
+        // QUEEN SIDE
+        // -----------------------------
+
+        if (!queensideRookMoved)
+        {
+            Piece rook =
+                board.GetPiece(queensideRookSquare);
+
+            if (rook.type == PieceType.Rook &&
+                rook.color == color)
+            {
+                int b = kingSquare - 3;
+                int c = kingSquare - 2;
+                int d = kingSquare - 1;
+
+                if (board.GetPiece(b).IsEmpty() &&
+                    board.GetPiece(c).IsEmpty() &&
+                    board.GetPiece(d).IsEmpty())
+                {
+                    moves.Add(
+                        new Move(
+                            kingSquare,
+                            c,
+                            MoveType.CastleQueenSide
+                        )
+                    );
+                }
+            }
+        }
+
+        return moves;
     }
 }
