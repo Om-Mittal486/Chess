@@ -641,6 +641,12 @@ public class ChessGameManager : MonoBehaviour
     {
         ClearMoveHints();
 
+        Piece piece = board.GetPiece(from);
+
+        if (piece.IsEmpty())
+            return;
+
+        // Normal piece moves
         List<Move> moves =
             MoveGenerator.GenerateMoves(
                 board,
@@ -655,6 +661,46 @@ public class ChessGameManager : MonoBehaviour
             {
                 if (squareViews.TryGetValue(
                     move.To,
+                    out SquareView squareView))
+                {
+                    squareView.ShowMoveHint();
+                }
+            }
+        }
+
+        // -------------------------------------------------
+        // CASTLING
+        // -------------------------------------------------
+
+        if (piece.type == PieceType.King)
+        {
+            int kingSquare = from;
+
+            int kingsideSquare = from + 2;
+            int queensideSquare = from - 2;
+
+            // Kingside
+            if (IsCastlingLegal(
+                from,
+                kingsideSquare,
+                piece.color))
+            {
+                if (squareViews.TryGetValue(
+                    kingsideSquare,
+                    out SquareView squareView))
+                {
+                    squareView.ShowMoveHint();
+                }
+            }
+
+            // Queenside
+            if (IsCastlingLegal(
+                from,
+                queensideSquare,
+                piece.color))
+            {
+                if (squareViews.TryGetValue(
+                    queensideSquare,
                     out SquareView squareView))
                 {
                     squareView.ShowMoveHint();
