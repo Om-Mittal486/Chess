@@ -388,6 +388,11 @@ public static class MoveGenerator
     {
         Piece piece = board.GetPiece(square);
 
+        if(piece.IsEmpty())
+        {
+            return new List<Move>();
+        }
+
         switch (piece.type)
         {
             case PieceType.Pawn:

@@ -29,6 +29,10 @@ public class ChessGameManager : MonoBehaviour
     // Currently selected piece
     private int selectedSquare = -1;
 
+    private PieceColor currentTurn = PieceColor.White;
+
+    private GameState currentGameState = GameState.Playing;
+
     private Dictionary<int, PieceView> pieceViews = new Dictionary<int, PieceView>();
 
     private void Start()
@@ -37,8 +41,6 @@ public class ChessGameManager : MonoBehaviour
         board.SetStartingPosition();
 
         SpawnPieces();
-
-        TestKnightMoves(1);
     }
 
     private void SpawnPieces()
@@ -86,16 +88,34 @@ public class ChessGameManager : MonoBehaviour
     // Called when the player clicks a chess piece
     public void SelectPiece(int square)
     {
+        if (currentGameState == GameState.Checkmate ||
+            currentGameState == GameState.Stalemate)
+        {
+            return;
+        }
+
         Piece piece = board.GetPiece(square);
 
-        // Don't select empty squares
         if (piece.IsEmpty())
             return;
+
+        // Only allow the current player to select their pieces
+        if (piece.color != currentTurn)
+        {
+            Debug.Log(
+                "It's " +
+                currentTurn +
+                "'s turn."
+            );
+
+            return;
+        }
 
         selectedSquare = square;
 
         Debug.Log(
-            "Selected: " + GetSquareName(square)
+            "Selected: " +
+            GetSquareName(square)
         );
     }
 
@@ -105,11 +125,19 @@ public class ChessGameManager : MonoBehaviour
         if (selectedSquare == -1)
             return;
 
-        Piece selectedPiece =
+        Piece movingPiece =
             board.GetPiece(selectedSquare);
 
-        // Check whether the requested move is legal
-        if (!IsLegalMove(selectedSquare, square))
+        // Make sure the selected piece belongs
+        // to the current player
+        if (movingPiece.color != currentTurn)
+        {
+            selectedSquare = -1;
+            return;
+        }
+
+        // Check whether the move is legal
+        if (!IsMoveLegal(selectedSquare, square))
         {
             Debug.Log(
                 "Illegal move: " +
@@ -131,7 +159,10 @@ public class ChessGameManager : MonoBehaviour
         Move move =
             new Move(selectedSquare, square);
 
-        // Update the internal board
+        // Handle capture
+        HandleCapture(square);
+
+        // Update internal board
         board.MakeMove(move);
 
         // Move visual piece
@@ -151,6 +182,9 @@ public class ChessGameManager : MonoBehaviour
 
         // Clear selection
         selectedSquare = -1;
+
+        // Switch player
+        SwitchTurn();
     }
 
     // Returns the correct sprite for a piece
@@ -245,43 +279,161 @@ public class ChessGameManager : MonoBehaviour
 
     public void SelectDestinationOrSelectPiece(int square)
     {
-        // Nothing selected yet → select this piece
+        Piece clickedPiece = board.GetPiece(square);
+
         if (selectedSquare == -1)
         {
             SelectPiece(square);
             return;
         }
 
-        // Something is already selected.
-        // Treat this clicked piece as the destination for now.
+        Piece selectedPiece = board.GetPiece(selectedSquare);
+
+        if (!clickedPiece.IsEmpty() &&
+            clickedPiece.color == selectedPiece.color)
+        {
+            SelectPiece(square);
+            return;
+        }
+
         SelectDestination(square);
     }
 
-    private void TestKnightMoves(int square)
+    private void HandleCapture(int square)
     {
-        List<Move> moves =
-            MoveGenerator.GenerateKnightMoves(
-                board,
-                square
-            );
+        Piece targetPiece =
+            board.GetPiece(square);
+
+        // Nothing to capture
+        if (targetPiece.IsEmpty())
+            return;
+
+        // Find the visual piece
+        if (pieceViews.TryGetValue(
+            square,
+            out PieceView capturedPiece))
+        {
+            Destroy(capturedPiece.gameObject);
+
+            pieceViews.Remove(square);
+        }
 
         Debug.Log(
-            "Knight moves from " +
+            "Captured piece on " +
             GetSquareName(square)
         );
-
-        foreach (Move move in moves)
-        {
-            Debug.Log(
-                GetSquareName(move.From) +
-                " → " +
-                GetSquareName(move.To)
-            );
-        }
     }
 
-    private bool IsLegalMove(int from, int to)
+    private void SwitchTurn()
     {
+        if (currentTurn == PieceColor.White)
+        {
+            currentTurn = PieceColor.Black;
+        }
+        else
+        {
+            currentTurn = PieceColor.White;
+        }
+
+        Debug.Log(
+            "Turn: " +
+            currentTurn
+        );
+
+        currentGameState = GetGameState();
+
+        Debug.Log(
+            "Game State: " +
+            currentGameState
+        );
+    }
+
+    private bool IsKingInCheck(
+        PieceColor color)
+    {
+        int kingSquare = -1;
+
+        for (int square = 0;
+            square < 64;
+            square++)
+        {
+            Piece piece =
+                board.GetPiece(square);
+
+            if (piece.type == PieceType.King &&
+                piece.color == color)
+            {
+                kingSquare = square;
+                break;
+            }
+        }
+
+        // Safety check
+        if (kingSquare == -1)
+            return false;
+
+        PieceColor enemyColor =
+            color == PieceColor.White
+                ? PieceColor.Black
+                : PieceColor.White;
+
+        return AttackDetector.IsSquareAttacked(
+            board,
+            kingSquare,
+            enemyColor);
+    }
+
+    private bool IsKingInCheck(
+        Board checkBoard,
+        PieceColor color)
+    {
+        int kingSquare = -1;
+
+
+        for (int square = 0;
+            square < 64;
+            square++)
+        {
+            Piece piece =
+                checkBoard.GetPiece(square);
+
+
+            if (piece.type == PieceType.King &&
+                piece.color == color)
+            {
+                kingSquare = square;
+                break;
+            }
+        }
+
+
+        if (kingSquare == -1)
+            return false;
+
+
+        PieceColor enemyColor =
+            color == PieceColor.White
+                ? PieceColor.Black
+                : PieceColor.White;
+
+
+        return AttackDetector.IsSquareAttacked(
+            checkBoard,
+            kingSquare,
+            enemyColor
+        );
+    }
+
+    private bool IsMoveLegal(int from, int to)
+    {
+        Piece movingPiece =
+            board.GetPiece(from);
+
+        if (movingPiece.IsEmpty())
+            return false;
+
+
+        // Generate the piece's movement possibilities
         List<Move> moves =
             MoveGenerator.GenerateMoves(
                 board,
@@ -289,13 +441,104 @@ public class ChessGameManager : MonoBehaviour
             );
 
 
-        foreach(Move move in moves)
+        // Check whether destination is a possible move
+        bool pseudoLegal = false;
+
+        foreach (Move move in moves)
         {
-            if(move.To == to)
-                return true;
+            if (move.To == to)
+            {
+                pseudoLegal = true;
+                break;
+            }
         }
 
 
-        return false;
+        if (!pseudoLegal)
+            return false;
+
+
+        // Create temporary board
+        Board testBoard = board.Copy();
+
+
+        // Apply the move to the temporary board
+        testBoard.MakeMove(
+            new Move(from, to)
+        );
+
+
+        // Check whether our King is now attacked
+        if (IsKingInCheck(
+            testBoard,
+            movingPiece.color))
+        {
+            return false;
+        }
+
+
+        return true;
+    }
+
+    private List<Move> GetAllLegalMoves(PieceColor color)
+    {
+        List<Move> legalMoves = new List<Move>();
+
+        for (int square = 0; square < 64; square++)
+        {
+            Piece piece = board.GetPiece(square);
+
+            // Ignore empty squares
+            if (piece.IsEmpty())
+                continue;
+
+            // Ignore opponent pieces
+            if (piece.color != color)
+                continue;
+
+            List<Move> pseudoLegalMoves =
+                MoveGenerator.GenerateMoves(
+                    board,
+                    square
+                );
+
+            foreach (Move move in pseudoLegalMoves)
+            {
+                if (IsMoveLegal(
+                    move.From,
+                    move.To))
+                {
+                    legalMoves.Add(move);
+                }
+            }
+        }
+
+        return legalMoves;
+    }
+
+    private GameState GetGameState()
+    {
+        bool inCheck =
+            IsKingInCheck(currentTurn);
+
+        List<Move> legalMoves =
+            GetAllLegalMoves(currentTurn);
+
+        if (legalMoves.Count == 0)
+        {
+            if (inCheck)
+            {
+                return GameState.Checkmate;
+            }
+
+            return GameState.Stalemate;
+        }
+
+        if (inCheck)
+        {
+            return GameState.Check;
+        }
+
+        return GameState.Playing;
     }
 }

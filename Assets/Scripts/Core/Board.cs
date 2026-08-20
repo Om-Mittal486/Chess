@@ -75,4 +75,16 @@ public class Board
         squares[move.From] =
             new Piece(PieceType.None, PieceColor.White);
     }
+
+    public Board Copy()
+    {
+        Board copy = new Board();
+
+        for (int i = 0; i < SquareCount; i++)
+        {
+            copy.squares[i] = this.squares[i];
+        }
+
+        return copy;
+    }
 }
