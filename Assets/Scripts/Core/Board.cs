@@ -17,6 +17,15 @@ public class Board
         squares[square] = piece;
     }
 
+    public void RemovePiece(int square)
+    {
+        squares[square] =
+            new Piece(
+                PieceType.None,
+                PieceColor.White
+            );
+    }
+
     public void ClearBoard()
     {
         for (int i = 0; i < SquareCount; i++)

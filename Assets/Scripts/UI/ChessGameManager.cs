@@ -46,6 +46,8 @@ public class ChessGameManager : MonoBehaviour
     private bool blackKingsideRookMoved = false;
     private bool blackQueensideRookMoved = false;
 
+    private int enPassantSquare = -1;
+
     private void Start()
     {
         board = new Board();
@@ -170,6 +172,7 @@ public class ChessGameManager : MonoBehaviour
             GetSquareName(square)
         );
 
+        // Determine move type
         MoveType moveType = MoveType.Normal;
 
         if (movingPiece.type == PieceType.King &&
@@ -184,6 +187,12 @@ public class ChessGameManager : MonoBehaviour
                 moveType = MoveType.CastleQueenSide;
             }
         }
+        else if (movingPiece.type == PieceType.Pawn &&
+                square == enPassantSquare &&
+                Mathf.Abs(square - selectedSquare) != 8)
+        {
+            moveType = MoveType.EnPassant;
+        }
 
         Move move =
             new Move(
@@ -193,14 +202,37 @@ public class ChessGameManager : MonoBehaviour
             );
 
         // Handle capture
-        if (move.Type != MoveType.CastleKingSide &&
-            move.Type != MoveType.CastleQueenSide)
+        if (move.Type == MoveType.EnPassant)
+        {
+            HandleEnPassantCapture(square);
+        }
+        else if (move.Type != MoveType.CastleKingSide &&
+                move.Type != MoveType.CastleQueenSide)
         {
             HandleCapture(square);
         }
 
         // Update internal board
         board.MakeMove(move);
+
+        // If En Passant, remove the captured pawn
+        // from the actual board as well
+        if (move.Type == MoveType.EnPassant)
+        {
+            int capturedSquare =
+                currentTurn == PieceColor.White
+                    ? square - 8
+                    : square + 8;
+
+            board.RemovePiece(capturedSquare);
+        }
+
+        // Update En Passant availability
+        UpdateEnPassant(
+            selectedSquare,
+            square,
+            movingPiece
+        );
 
         // Update king/rook movement rights
         UpdateMovementRights(
@@ -368,6 +400,61 @@ public class ChessGameManager : MonoBehaviour
         SelectDestination(square);
     }
 
+    private void HandleEnPassantCapture(
+        int destination)
+    {
+        int capturedSquare;
+
+        if (currentTurn == PieceColor.White)
+        {
+            capturedSquare = destination - 8;
+        }
+        else
+        {
+            capturedSquare = destination + 8;
+        }
+
+        if (pieceViews.TryGetValue(
+            capturedSquare,
+            out PieceView capturedPiece))
+        {
+            Destroy(capturedPiece.gameObject);
+
+            pieceViews.Remove(capturedSquare);
+        }
+
+        Debug.Log(
+            "En Passant capture: " +
+            GetSquareName(capturedSquare)
+        );
+    }
+
+
+    private void UpdateEnPassant(
+        int from,
+        int to,
+        Piece piece)
+    {
+        // En Passant is available for only one turn.
+        enPassantSquare = -1;
+
+        if (piece.type != PieceType.Pawn)
+            return;
+
+        // Pawn moved two squares.
+        if (Mathf.Abs(to - from) == 16)
+        {
+            // Square jumped over by the pawn.
+            enPassantSquare =
+                (from + to) / 2;
+
+            Debug.Log(
+                "En Passant available on " +
+                GetSquareName(enPassantSquare)
+            );
+        }
+    }
+
     private void HandleCapture(int square)
     {
         Piece targetPiece =
@@ -522,7 +609,8 @@ public class ChessGameManager : MonoBehaviour
         List<Move> moves =
             MoveGenerator.GenerateMoves(
                 board,
-                from
+                from,
+                enPassantSquare
             );
 
         bool pseudoLegal = false;
@@ -543,10 +631,34 @@ public class ChessGameManager : MonoBehaviour
         Board testBoard =
             board.Copy();
 
-        // Apply move
+        // Apply the move to the temporary board
         testBoard.MakeMove(
             new Move(from, to)
         );
+
+        // En Passant requires removing the pawn
+        // that was captured beside the destination.
+        if (movingPiece.type == PieceType.Pawn &&
+            to == enPassantSquare &&
+            Mathf.Abs(to - from) != 8)
+        {
+            int capturedSquare =
+                movingPiece.color == PieceColor.White
+                    ? to - 8
+                    : to + 8;
+
+            testBoard.RemovePiece(
+                capturedSquare
+            );
+        }
+
+        // Make sure our own King isn't left in check
+        if (IsKingInCheck(
+            testBoard,
+            movingPiece.color))
+        {
+            return false;
+        }
 
         // Make sure our own King isn't left in check
         if (IsKingInCheck(
@@ -578,7 +690,8 @@ public class ChessGameManager : MonoBehaviour
             List<Move> pseudoLegalMoves =
                 MoveGenerator.GenerateMoves(
                     board,
-                    square
+                    square,
+                    enPassantSquare
                 );
 
             foreach (Move move in pseudoLegalMoves)
@@ -650,7 +763,8 @@ public class ChessGameManager : MonoBehaviour
         List<Move> moves =
             MoveGenerator.GenerateMoves(
                 board,
-                from
+                from,
+                enPassantSquare
             );
 
         foreach (Move move in moves)
