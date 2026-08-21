@@ -25,7 +25,9 @@ public class ChessGameManager : MonoBehaviour
     [SerializeField] private Sprite blackKing;
 
     [Header("Promotion")]
-    [SerializeField] private GameObject promotionPanel;
+    [SerializeField] private GameObject whitePromotionPanel;
+
+    [SerializeField] private GameObject blackPromotionPanel;
 
     private Board board;
 
@@ -303,7 +305,15 @@ public class ChessGameManager : MonoBehaviour
 
                 promotionColor = movingPiece.color;
 
-                promotionPanel.SetActive(true);
+                // Open correct promotion panel
+                if (promotionColor == PieceColor.White)
+                {
+                    whitePromotionPanel.SetActive(true);
+                }
+                else
+                {
+                    blackPromotionPanel.SetActive(true);
+                }
             }
         }
 
@@ -460,7 +470,8 @@ public class ChessGameManager : MonoBehaviour
             "Promoted to " + type
         );
 
-        promotionPanel.SetActive(false);
+        whitePromotionPanel.SetActive(false);
+        blackPromotionPanel.SetActive(false);
     }
 
     // Returns the correct sprite for a piece
