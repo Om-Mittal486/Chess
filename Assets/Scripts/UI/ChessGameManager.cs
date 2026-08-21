@@ -24,6 +24,9 @@ public class ChessGameManager : MonoBehaviour
     [SerializeField] private Sprite blackQueen;
     [SerializeField] private Sprite blackKing;
 
+    [Header("Promotion")]
+    [SerializeField] private GameObject promotionPanel;
+
     private Board board;
 
     // Currently selected piece
@@ -48,12 +51,38 @@ public class ChessGameManager : MonoBehaviour
 
     private int enPassantSquare = -1;
 
+    private bool waitingForPromotion = false;
+
+    private int promotionSquare = -1;
+
+    private PieceColor promotionColor;
+
     private void Start()
     {
         board = new Board();
         board.SetStartingPosition();
 
         SpawnPieces();
+    }
+
+    public void PromoteToQueen()
+    {
+        PromoteTo(PieceType.Queen);
+    }
+
+    public void PromoteToRook()
+    {
+        PromoteTo(PieceType.Rook);
+    }
+
+    public void PromoteToBishop()
+    {
+        PromoteTo(PieceType.Bishop);
+    }
+
+    public void PromoteToKnight()
+    {
+        PromoteTo(PieceType.Knight);
     }
 
     private void SpawnPieces()
@@ -96,6 +125,67 @@ public class ChessGameManager : MonoBehaviour
                 pieceView.OnPieceClicked
             );
         }
+    }
+
+    private void SpawnPiece(
+        PieceType type,
+        PieceColor color,
+        int square
+    )
+    {
+        GameObject pieceObject =
+            Instantiate(
+                piecePrefab,
+                boardTransform
+            );
+
+
+        pieceObject.name =
+            GetSquareName(square);
+
+
+        RectTransform rect =
+            pieceObject.GetComponent<RectTransform>();
+
+
+        rect.anchoredPosition =
+            GetPosition(square);
+
+
+        PieceView pieceView =
+            pieceObject.GetComponent<PieceView>();
+
+
+        Piece piece =
+            new Piece(
+                type,
+                color
+            );
+
+
+        pieceView.SetSprite(
+            GetSprite(piece)
+        );
+
+
+        pieceView.SetSquare(square);
+
+        pieceView.SetGameManager(this);
+
+
+        pieceViews.Add(
+            square,
+            pieceView
+        );
+
+
+        Button button =
+            pieceObject.GetComponent<Button>();
+
+
+        button.onClick.AddListener(
+            pieceView.OnPieceClicked
+        );
     }
 
     // Called when the player clicks a chess piece
@@ -194,11 +284,36 @@ public class ChessGameManager : MonoBehaviour
             moveType = MoveType.EnPassant;
         }
 
+        PieceType promotionPiece = PieceType.None;
+
+
+        if(movingPiece.type == PieceType.Pawn)
+        {
+            int targetRank = square / 8;
+
+
+            if(targetRank == 7 ||
+                targetRank == 0)
+            {
+                moveType = MoveType.Promotion;
+
+                waitingForPromotion = true;
+
+                promotionSquare = square;
+
+                promotionColor = movingPiece.color;
+
+                promotionPanel.SetActive(true);
+            }
+        }
+
+
         Move move =
             new Move(
                 selectedSquare,
                 square,
-                moveType
+                moveType,
+                promotionPiece
             );
 
         // Handle capture
@@ -273,6 +388,14 @@ public class ChessGameManager : MonoBehaviour
         // Update PieceView
         pieceView.SetSquare(square);
 
+        if(move.Type == MoveType.Promotion)
+        {
+            PromotePiece(
+                square,
+                move.PromotionPiece
+            );
+        }
+
         // Clear move suggestions
         ClearMoveHints();
 
@@ -281,6 +404,63 @@ public class ChessGameManager : MonoBehaviour
 
         // Switch player
         SwitchTurn();
+    }
+
+    private void PromotePiece(
+        int square,
+        PieceType newType)
+    {
+        PieceView oldPiece =
+            pieceViews[square];
+
+
+        Destroy(
+            oldPiece.gameObject
+        );
+
+
+        pieceViews.Remove(square);
+
+
+        SpawnPiece(
+            newType,
+            board.GetPiece(square).color,
+            square
+        );
+    }
+
+    public void PromoteTo(PieceType type)
+    {
+        if(!waitingForPromotion)
+            return;
+
+
+        Piece oldPiece =
+            board.GetPiece(promotionSquare);
+
+
+        board.SetPiece(
+            promotionSquare,
+            new Piece(
+                type,
+                promotionColor
+            )
+        );
+
+
+        PromotePiece(
+            promotionSquare,
+            type
+        );
+
+
+        waitingForPromotion = false;
+
+        Debug.Log(
+            "Promoted to " + type
+        );
+
+        promotionPanel.SetActive(false);
     }
 
     // Returns the correct sprite for a piece
@@ -650,14 +830,6 @@ public class ChessGameManager : MonoBehaviour
             testBoard.RemovePiece(
                 capturedSquare
             );
-        }
-
-        // Make sure our own King isn't left in check
-        if (IsKingInCheck(
-            testBoard,
-            movingPiece.color))
-        {
-            return false;
         }
 
         // Make sure our own King isn't left in check

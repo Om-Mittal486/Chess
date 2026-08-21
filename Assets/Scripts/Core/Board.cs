@@ -79,10 +79,29 @@ public class Board
 
     public void MakeMove(Move move)
     {
-        squares[move.To] = squares[move.From];
+        Piece movingPiece =
+            squares[move.From];
+
+
+        // Promotion
+        if(move.Type == MoveType.Promotion)
+        {
+            movingPiece =
+                new Piece(
+                    move.PromotionPiece,
+                    movingPiece.color
+                );
+        }
+
+
+        squares[move.To] = movingPiece;
+
 
         squares[move.From] =
-            new Piece(PieceType.None, PieceColor.White);
+            new Piece(
+                PieceType.None,
+                PieceColor.White
+            );
     }
 
     public Board Copy()
