@@ -67,6 +67,8 @@ public class ChessGameManager : MonoBehaviour
 
     private Dictionary<string, int> positionHistory = new Dictionary<string, int>();
 
+    private Stack<MoveState> moveHistory = new Stack<MoveState>();
+
     private void Start()
     {
         board = new Board();
@@ -185,7 +187,7 @@ public class ChessGameManager : MonoBehaviour
         return false;
     }
 
-    private void RecordPosition()
+    private string RecordPosition()
     {
         string key =
             GetPositionKey();
@@ -198,6 +200,8 @@ public class ChessGameManager : MonoBehaviour
         {
             positionHistory[key] = 1;
         }
+
+        return key;
     }
 
     private string GetPositionKey()
@@ -532,6 +536,8 @@ public class ChessGameManager : MonoBehaviour
         }
 
         bool wasCapture = !board.GetPiece(square).IsEmpty();
+
+        SaveMoveState(move);
         // Update internal board
         board.MakeMove(move);
 
@@ -581,6 +587,18 @@ public class ChessGameManager : MonoBehaviour
         }
 
         // Move visual piece
+        if(!pieceViews.ContainsKey(selectedSquare))
+        {
+            Debug.LogError(
+                "Missing PieceView at square "
+                + selectedSquare
+            );
+
+            selectedSquare = -1;
+            return;
+        }
+
+
         PieceView pieceView =
             pieceViews[selectedSquare];
 
@@ -612,7 +630,9 @@ public class ChessGameManager : MonoBehaviour
         // Switch player
         SwitchTurn();
 
-        RecordPosition();
+        string key = RecordPosition();
+
+        moveHistory.Peek().positionKeyAfterMove = key;
         // -------------------------------------------------
         // INSUFFICIENT MATERIAL
         // -------------------------------------------------
@@ -640,6 +660,184 @@ public class ChessGameManager : MonoBehaviour
             DeclareDraw(
                 "Draw by 50-move rule."
             );
+        }
+    }
+
+    private void SaveMoveState(
+        Move move
+    )
+    {
+
+        MoveState state =
+            new MoveState(move);
+
+
+        state.movedPiece =
+            board.GetPiece(move.From);
+
+
+        state.capturedPiece =
+            board.GetPiece(move.To);
+
+
+        state.previousEnPassantSquare =
+            enPassantSquare;
+
+
+        state.previousWhiteKingMoved =
+            whiteKingMoved;
+
+        state.previousBlackKingMoved =
+            blackKingMoved;
+
+
+        state.previousWhiteKingsideRookMoved =
+            whiteKingsideRookMoved;
+
+        state.previousWhiteQueensideRookMoved =
+            whiteQueensideRookMoved;
+
+
+        state.previousBlackKingsideRookMoved =
+            blackKingsideRookMoved;
+
+        state.previousBlackQueensideRookMoved =
+            blackQueensideRookMoved;
+
+
+        state.previousHalfmoveClock =
+            halfmoveClock;
+        
+        state.previousTurn = currentTurn;
+
+        state.previousGameOver = gameOver;
+
+        moveHistory.Push(state);
+    }
+
+    public void UndoMove()
+    {
+        if(moveHistory.Count == 0)
+            return;
+
+        RemoveLastPosition();
+
+        MoveState state =
+            moveHistory.Pop();
+
+
+        Move move =
+            state.move;
+
+
+        // Restore board
+        board.SetPiece(
+            move.From,
+            state.movedPiece
+        );
+
+
+        board.SetPiece(
+            move.To,
+            state.capturedPiece
+        );
+
+
+        // Restore visual piece
+
+        if(pieceViews.TryGetValue(move.To, out PieceView movedView))
+        {
+            pieceViews.Remove(move.To);
+
+            pieceViews[move.From] =
+                movedView;
+
+
+            movedView.SetSquare(
+                move.From
+            );
+
+
+            movedView.MoveTo(
+                GetPosition(move.From)
+            );
+        }
+
+
+        // Restore captured piece visually
+
+        if(!state.capturedPiece.IsEmpty())
+        {
+            SpawnPiece(
+                state.capturedPiece.type,
+                state.capturedPiece.color,
+                move.To
+            );
+        }
+
+
+        // Restore special states
+
+        enPassantSquare =
+            state.previousEnPassantSquare;
+
+
+        halfmoveClock =
+            state.previousHalfmoveClock;
+
+        currentTurn = state.previousTurn;
+
+        gameOver = state.previousGameOver;
+
+        whiteKingMoved =
+            state.previousWhiteKingMoved;
+
+        blackKingMoved =
+            state.previousBlackKingMoved;
+
+
+        whiteKingsideRookMoved =
+            state.previousWhiteKingsideRookMoved;
+
+        whiteQueensideRookMoved =
+            state.previousWhiteQueensideRookMoved;
+
+
+        blackKingsideRookMoved =
+            state.previousBlackKingsideRookMoved;
+
+        blackQueensideRookMoved =
+            state.previousBlackQueensideRookMoved;
+
+
+        Debug.Log(
+            "Move undone"
+        );
+    }
+
+    private void RemoveLastPosition()
+    {
+        if(moveHistory.Count == 0)
+            return;
+
+
+        MoveState lastMove =
+            moveHistory.Peek();
+
+
+        string key =
+            lastMove.positionKeyAfterMove;
+
+
+        if(positionHistory.ContainsKey(key))
+        {
+            positionHistory[key]--;
+
+
+            if(positionHistory[key] <= 0)
+            {
+                positionHistory.Remove(key);
+            }
         }
     }
 
