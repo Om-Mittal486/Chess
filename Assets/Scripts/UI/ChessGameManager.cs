@@ -53,18 +53,209 @@ public class ChessGameManager : MonoBehaviour
 
     private int enPassantSquare = -1;
 
+    // Number of consecutive half-moves
+    // without a pawn move or capture.
+    private int halfmoveClock = 0;
+
     private bool waitingForPromotion = false;
 
     private int promotionSquare = -1;
 
     private PieceColor promotionColor;
 
+    private bool gameOver = false;
+
+    private Dictionary<string, int> positionHistory = new Dictionary<string, int>();
+
     private void Start()
     {
         board = new Board();
         board.SetStartingPosition();
+        RecordPosition();
 
         SpawnPieces();
+    }
+
+    private bool IsInsufficientMaterialDraw()
+    {
+        int whiteBishops = 0;
+        int whiteKnights = 0;
+
+        int blackBishops = 0;
+        int blackKnights = 0;
+
+        int whiteOtherPieces = 0;
+        int blackOtherPieces = 0;
+
+
+        // Examine the entire board
+        for (int square = 0; square < 64; square++)
+        {
+            Piece piece =
+                board.GetPiece(square);
+
+            if (piece.IsEmpty())
+                continue;
+
+
+            switch (piece.type)
+            {
+                case PieceType.Bishop:
+
+                    if (piece.color == PieceColor.White)
+                        whiteBishops++;
+                    else
+                        blackBishops++;
+
+                    break;
+
+
+                case PieceType.Knight:
+
+                    if (piece.color == PieceColor.White)
+                        whiteKnights++;
+                    else
+                        blackKnights++;
+
+                    break;
+
+
+                case PieceType.King:
+
+                    // Ignore kings
+                    break;
+
+
+                default:
+
+                    // Pawn, Rook or Queen
+                    if (piece.color == PieceColor.White)
+                        whiteOtherPieces++;
+                    else
+                        blackOtherPieces++;
+
+                    break;
+            }
+        }
+
+
+        // Pawn, Rook or Queen means
+        // we have potentially sufficient material.
+        if (whiteOtherPieces > 0 ||
+            blackOtherPieces > 0)
+        {
+            return false;
+        }
+
+
+        int whiteMinorPieces =
+            whiteBishops + whiteKnights;
+
+        int blackMinorPieces =
+            blackBishops + blackKnights;
+
+
+        // -------------------------------------------------
+        // King vs King
+        // -------------------------------------------------
+
+        if (whiteMinorPieces == 0 &&
+            blackMinorPieces == 0)
+        {
+            return true;
+        }
+
+
+        // -------------------------------------------------
+        // King + Bishop/Knight vs King
+        // -------------------------------------------------
+
+        if (whiteMinorPieces == 1 &&
+            blackMinorPieces == 0)
+        {
+            return true;
+        }
+
+        if (blackMinorPieces == 1 &&
+            whiteMinorPieces == 0)
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private void RecordPosition()
+    {
+        string key =
+            GetPositionKey();
+
+        if (positionHistory.ContainsKey(key))
+        {
+            positionHistory[key]++;
+        }
+        else
+        {
+            positionHistory[key] = 1;
+        }
+    }
+
+    private string GetPositionKey()
+    {
+        System.Text.StringBuilder key =
+            new System.Text.StringBuilder();
+
+        // Board pieces
+        for (int square = 0; square < 64; square++)
+        {
+            Piece piece =
+                board.GetPiece(square);
+
+            key.Append(
+                (int)piece.type
+            );
+
+            key.Append(
+                (int)piece.color
+            );
+        }
+
+        // Side to move
+        key.Append(
+            (int)currentTurn
+        );
+
+        // Castling rights
+        key.Append(
+            whiteKingMoved ? "1" : "0"
+        );
+
+        key.Append(
+            blackKingMoved ? "1" : "0"
+        );
+
+        key.Append(
+            whiteKingsideRookMoved ? "1" : "0"
+        );
+
+        key.Append(
+            whiteQueensideRookMoved ? "1" : "0"
+        );
+
+        key.Append(
+            blackKingsideRookMoved ? "1" : "0"
+        );
+
+        key.Append(
+            blackQueensideRookMoved ? "1" : "0"
+        );
+
+        // En Passant state
+        key.Append(
+            enPassantSquare
+        );
+
+        return key.ToString();
     }
 
     public void PromoteToQueen()
@@ -229,6 +420,9 @@ public class ChessGameManager : MonoBehaviour
     // Called when the player clicks a destination square
     public void SelectDestination(int square)
     {
+        if (gameOver)
+            return;
+            
         if (selectedSquare == -1)
             return;
 
@@ -337,8 +531,11 @@ public class ChessGameManager : MonoBehaviour
             HandleCapture(square);
         }
 
+        bool wasCapture = !board.GetPiece(square).IsEmpty();
         // Update internal board
         board.MakeMove(move);
+
+        UpdateHalfmoveClock(movingPiece, wasCapture, move);
 
         // If En Passant, remove the captured pawn
         // from the actual board as well
@@ -414,6 +611,93 @@ public class ChessGameManager : MonoBehaviour
 
         // Switch player
         SwitchTurn();
+
+        RecordPosition();
+        // -------------------------------------------------
+        // INSUFFICIENT MATERIAL
+        // -------------------------------------------------
+
+        if (IsInsufficientMaterialDraw())
+        {
+            DeclareDraw(
+                "Draw by insufficient material."
+            );
+
+            return;
+        }
+
+        if (IsThreefoldRepetition())
+        {
+            DeclareDraw(
+                "Draw by threefold repetition."
+            );
+
+            return;
+        }
+
+        if (IsFiftyMoveDraw())
+        {
+            DeclareDraw(
+                "Draw by 50-move rule."
+            );
+        }
+    }
+
+    private bool IsThreefoldRepetition()
+    {
+        string key =
+            GetPositionKey();
+
+        if (positionHistory.TryGetValue(
+            key,
+            out int count))
+        {
+            return count >= 3;
+        }
+
+        return false;
+    }
+
+    private void DeclareDraw(string reason)
+    {
+        gameOver = true;
+
+        ClearMoveHints();
+
+        selectedSquare = -1;
+
+        Debug.Log(
+            "DRAW: " + reason
+        );
+    }
+
+    private void UpdateHalfmoveClock(
+        Piece movingPiece,
+        bool wasCapture,
+        Move move)
+    {
+        // Pawn move
+        if (movingPiece.type == PieceType.Pawn)
+        {
+            halfmoveClock = 0;
+            return;
+        }
+
+        // Capture
+        if (wasCapture ||
+            move.Type == MoveType.EnPassant)
+        {
+            halfmoveClock = 0;
+            return;
+        }
+
+        // Otherwise increment
+        halfmoveClock++;
+    }
+
+    private bool IsFiftyMoveDraw()
+    {
+        return halfmoveClock >= 100;
     }
 
     private void PromotePiece(
