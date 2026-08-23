@@ -29,7 +29,7 @@ public class ChessGameManager : MonoBehaviour
 
     [SerializeField] private GameObject blackPromotionPanel;
 
-    private Board board;
+    private ChessEngine engine;
 
     // Currently selected piece
     private int selectedSquare = -1;
@@ -69,13 +69,30 @@ public class ChessGameManager : MonoBehaviour
 
     private Stack<MoveState> moveHistory = new Stack<MoveState>();
 
+    private ulong currentPositionHash;
+
     private void Start()
     {
-        board = new Board();
-        board.SetStartingPosition();
+        engine = new ChessEngine();
         RecordPosition();
-
+        UpdatePositionHash();
         SpawnPieces();
+    }
+
+    private void UpdatePositionHash()
+    {
+        currentPositionHash =
+            ZobristHash.CalculateHash(
+                engine.board,
+                currentTurn,
+                whiteKingMoved,
+                blackKingMoved,
+                whiteKingsideRookMoved,
+                whiteQueensideRookMoved,
+                blackKingsideRookMoved,
+                blackQueensideRookMoved,
+                enPassantSquare
+            );
     }
 
     private bool IsInsufficientMaterialDraw()
@@ -94,7 +111,7 @@ public class ChessGameManager : MonoBehaviour
         for (int square = 0; square < 64; square++)
         {
             Piece piece =
-                board.GetPiece(square);
+                engine.board.GetPiece(square);
 
             if (piece.IsEmpty())
                 continue;
@@ -213,7 +230,7 @@ public class ChessGameManager : MonoBehaviour
         for (int square = 0; square < 64; square++)
         {
             Piece piece =
-                board.GetPiece(square);
+                engine.board.GetPiece(square);
 
             key.Append(
                 (int)piece.type
@@ -286,7 +303,7 @@ public class ChessGameManager : MonoBehaviour
     {
         for (int square = 0; square < 64; square++)
         {
-            Piece piece = board.GetPiece(square);
+            Piece piece = engine.board.GetPiece(square);
 
             // Don't create anything for empty squares
             if (piece.IsEmpty())
@@ -394,7 +411,7 @@ public class ChessGameManager : MonoBehaviour
             return;
         }
 
-        Piece piece = board.GetPiece(square);
+        Piece piece = engine.board.GetPiece(square);
 
         if (piece.IsEmpty())
             return;
@@ -431,7 +448,7 @@ public class ChessGameManager : MonoBehaviour
             return;
 
         Piece movingPiece =
-            board.GetPiece(selectedSquare);
+            engine.board.GetPiece(selectedSquare);
 
         // Make sure the selected piece belongs
         // to the current player
@@ -443,7 +460,7 @@ public class ChessGameManager : MonoBehaviour
         }
 
         // Check whether the move is legal
-        if (!IsMoveLegal(selectedSquare, square))
+        if (!engine.IsMoveLegal(selectedSquare, square))
         {
             Debug.Log(
                 "Illegal move: " +
@@ -535,11 +552,11 @@ public class ChessGameManager : MonoBehaviour
             HandleCapture(square);
         }
 
-        bool wasCapture = !board.GetPiece(square).IsEmpty();
+        bool wasCapture = !engine.board.GetPiece(square).IsEmpty();
 
         SaveMoveState(move);
         // Update internal board
-        board.MakeMove(move);
+        engine.board.MakeMove(move);
 
         UpdateHalfmoveClock(movingPiece, wasCapture, move);
 
@@ -552,7 +569,7 @@ public class ChessGameManager : MonoBehaviour
                     ? square - 8
                     : square + 8;
 
-            board.RemovePiece(capturedSquare);
+            engine.board.RemovePiece(capturedSquare);
         }
 
         // Update En Passant availability
@@ -630,6 +647,8 @@ public class ChessGameManager : MonoBehaviour
         // Switch player
         SwitchTurn();
 
+        UpdatePositionHash();
+
         string key = RecordPosition();
 
         moveHistory.Peek().positionKeyAfterMove = key;
@@ -662,23 +681,102 @@ public class ChessGameManager : MonoBehaviour
             );
         }
     }
-
-    private void SaveMoveState(
-        Move move
-    )
+    
+    private void SaveMoveState(Move move)
     {
-
         MoveState state =
             new MoveState(move);
 
 
+        // Moving piece
         state.movedPiece =
-            board.GetPiece(move.From);
+            engine.board.GetPiece(move.From);
 
 
+        // Default captured square
+        state.capturedSquare =
+            move.To;
+
+
+        // Normal capture
         state.capturedPiece =
-            board.GetPiece(move.To);
+            engine.board.GetPiece(move.To);
 
+
+        // En Passant
+        if (move.Type == MoveType.EnPassant)
+        {
+            int direction =
+                state.movedPiece.color == PieceColor.White
+                    ? -8
+                    : 8;
+
+
+            state.capturedSquare =
+                move.To + direction;
+
+
+            state.capturedPiece =
+                engine.board.GetPiece(
+                    state.capturedSquare
+                );
+        }
+
+
+        // Promotion
+        if (move.Type == MoveType.Promotion)
+        {
+            state.promotedPiece =
+                move.PromotionPiece;
+        }
+
+
+        // Castling
+        if (move.Type == MoveType.CastleKingSide)
+        {
+            if (state.movedPiece.color ==
+                PieceColor.White)
+            {
+                state.rookFrom = 7;
+                state.rookTo = 5;
+            }
+            else
+            {
+                state.rookFrom = 63;
+                state.rookTo = 61;
+            }
+
+
+            state.rookPiece =
+                engine.board.GetPiece(
+                    state.rookFrom
+                );
+        }
+
+
+        if (move.Type == MoveType.CastleQueenSide)
+        {
+            if (state.movedPiece.color ==
+                PieceColor.White)
+            {
+                state.rookFrom = 0;
+                state.rookTo = 3;
+            }
+            else
+            {
+                state.rookFrom = 56;
+                state.rookTo = 59;
+            }
+
+
+            state.rookPiece =
+                engine.board.GetPiece(
+                    state.rookFrom
+                );
+        }
+
+
+        // Previous special-rule state
 
         state.previousEnPassantSquare =
             enPassantSquare;
@@ -705,52 +803,51 @@ public class ChessGameManager : MonoBehaviour
             blackQueensideRookMoved;
 
 
+        // Draw state
+
         state.previousHalfmoveClock =
             halfmoveClock;
-        
-        state.previousTurn = currentTurn;
 
-        state.previousGameOver = gameOver;
+        state.previousTurn =
+            currentTurn;
+
+        state.previousGameOver =
+            gameOver;
+
 
         moveHistory.Push(state);
     }
 
-    public void UndoMove()
+    private void RestoreVisualAfterUndo(
+        MoveState state
+    )
     {
-        if(moveHistory.Count == 0)
-            return;
-
-        RemoveLastPosition();
-
-        MoveState state =
-            moveHistory.Pop();
-
-
         Move move =
             state.move;
 
 
-        // Restore board
-        board.SetPiece(
-            move.From,
-            state.movedPiece
-        );
+        // -------------------------------------------------
+        // Remove current piece from destination
+        // -------------------------------------------------
 
-
-        board.SetPiece(
+        if (pieceViews.TryGetValue(
             move.To,
-            state.capturedPiece
-        );
-
-
-        // Restore visual piece
-
-        if(pieceViews.TryGetValue(move.To, out PieceView movedView))
+            out PieceView movedView))
         {
-            pieceViews.Remove(move.To);
+            pieceViews.Remove(
+                move.To
+            );
 
-            pieceViews[move.From] =
-                movedView;
+            // Promotion:
+            // Queen/Rook/Bishop/Knight → Pawn
+            if (move.Type == MoveType.Promotion)
+            {
+                movedView.SetSprite(
+                    GetSprite(
+                        state.movedPiece
+                    )
+                );
+            }
 
 
             movedView.SetSquare(
@@ -761,33 +858,137 @@ public class ChessGameManager : MonoBehaviour
             movedView.MoveTo(
                 GetPosition(move.From)
             );
+
+
+            pieceViews[
+                move.From
+            ] = movedView;
         }
 
 
+        // -------------------------------------------------
         // Restore captured piece visually
+        // -------------------------------------------------
 
-        if(!state.capturedPiece.IsEmpty())
+        if (!state.capturedPiece.IsEmpty())
         {
             SpawnPiece(
                 state.capturedPiece.type,
                 state.capturedPiece.color,
-                move.To
+                state.capturedSquare
             );
         }
 
 
-        // Restore special states
+        // -------------------------------------------------
+        // Restore castling rook visually
+        // -------------------------------------------------
+
+        if (move.Type == MoveType.CastleKingSide ||
+            move.Type == MoveType.CastleQueenSide)
+        {
+            if (pieceViews.TryGetValue(
+                state.rookTo,
+                out PieceView rookView))
+            {
+                pieceViews.Remove(
+                    state.rookTo
+                );
+
+
+                rookView.SetSquare(
+                    state.rookFrom
+                );
+
+
+                rookView.MoveTo(
+                    GetPosition(
+                        state.rookFrom
+                    )
+                );
+
+
+                pieceViews[
+                    state.rookFrom
+                ] = rookView;
+            }
+        }
+    }
+
+    public void UndoMove()
+    {
+        if (moveHistory.Count == 0)
+            return;
+
+
+        // Remove the position created by this move
+        RemoveLastPosition();
+
+
+        MoveState state =
+            moveHistory.Pop();
+
+
+        Move move =
+            state.move;
+
+
+        // -------------------------------------------------
+        // Remove the moved piece from its current square
+        // -------------------------------------------------
+
+        engine.board.RemovePiece(move.To);
+
+
+        // -------------------------------------------------
+        // Restore the original moving piece
+        // -------------------------------------------------
+
+        engine.board.SetPiece(
+            move.From,
+            state.movedPiece
+        );
+
+
+        // -------------------------------------------------
+        // Restore captured piece
+        // -------------------------------------------------
+
+        if (!state.capturedPiece.IsEmpty())
+        {
+            engine.board.SetPiece(
+                state.capturedSquare,
+                state.capturedPiece
+            );
+        }
+
+
+        // -------------------------------------------------
+        // Restore castling rook
+        // -------------------------------------------------
+
+        if (move.Type == MoveType.CastleKingSide ||
+            move.Type == MoveType.CastleQueenSide)
+        {
+            engine.board.RemovePiece(
+                state.rookTo
+            );
+
+
+            engine.board.SetPiece(
+                state.rookFrom,
+                state.rookPiece
+            );
+        }
+
+
+        // -------------------------------------------------
+        // Restore special-rule state
+        // -------------------------------------------------
 
         enPassantSquare =
             state.previousEnPassantSquare;
 
-
-        halfmoveClock =
-            state.previousHalfmoveClock;
-
-        currentTurn = state.previousTurn;
-
-        gameOver = state.previousGameOver;
 
         whiteKingMoved =
             state.previousWhiteKingMoved;
@@ -810,8 +1011,33 @@ public class ChessGameManager : MonoBehaviour
             state.previousBlackQueensideRookMoved;
 
 
+        // -------------------------------------------------
+        // Restore draw state
+        // -------------------------------------------------
+
+        halfmoveClock =
+            state.previousHalfmoveClock;
+
+
+        currentTurn =
+            state.previousTurn;
+
+
+        gameOver =
+            state.previousGameOver;
+
+
+        // -------------------------------------------------
+        // Restore visual pieces
+        // -------------------------------------------------
+
+        RestoreVisualAfterUndo(
+            state
+        );
+
+
         Debug.Log(
-            "Move undone"
+            "Move undone successfully."
         );
     }
 
@@ -916,7 +1142,7 @@ public class ChessGameManager : MonoBehaviour
 
         SpawnPiece(
             newType,
-            board.GetPiece(square).color,
+            engine.board.GetPiece(square).color,
             square
         );
     }
@@ -928,10 +1154,10 @@ public class ChessGameManager : MonoBehaviour
 
 
         Piece oldPiece =
-            board.GetPiece(promotionSquare);
+            engine.board.GetPiece(promotionSquare);
 
 
-        board.SetPiece(
+        engine.board.SetPiece(
             promotionSquare,
             new Piece(
                 type,
@@ -1049,7 +1275,7 @@ public class ChessGameManager : MonoBehaviour
     public void SelectDestinationOrSelectPiece(int square)
     {
         Piece clickedPiece =
-            board.GetPiece(square);
+            engine.board.GetPiece(square);
 
         // Nothing selected
         if (selectedSquare == -1)
@@ -1059,7 +1285,7 @@ public class ChessGameManager : MonoBehaviour
         }
 
         Piece selectedPiece =
-            board.GetPiece(selectedSquare);
+            engine.board.GetPiece(selectedSquare);
 
         // Clicked another friendly piece
         if (!clickedPiece.IsEmpty() &&
@@ -1131,7 +1357,7 @@ public class ChessGameManager : MonoBehaviour
     private void HandleCapture(int square)
     {
         Piece targetPiece =
-            board.GetPiece(square);
+            engine.board.GetPiece(square);
 
         // Nothing to capture
         if (targetPiece.IsEmpty())
@@ -1178,41 +1404,6 @@ public class ChessGameManager : MonoBehaviour
     }
 
     private bool IsKingInCheck(
-        PieceColor color)
-    {
-        int kingSquare = -1;
-
-        for (int square = 0;
-            square < 64;
-            square++)
-        {
-            Piece piece =
-                board.GetPiece(square);
-
-            if (piece.type == PieceType.King &&
-                piece.color == color)
-            {
-                kingSquare = square;
-                break;
-            }
-        }
-
-        // Safety check
-        if (kingSquare == -1)
-            return false;
-
-        PieceColor enemyColor =
-            color == PieceColor.White
-                ? PieceColor.Black
-                : PieceColor.White;
-
-        return AttackDetector.IsSquareAttacked(
-            board,
-            kingSquare,
-            enemyColor);
-    }
-
-    private bool IsKingInCheck(
         Board checkBoard,
         PieceColor color)
     {
@@ -1256,7 +1447,7 @@ public class ChessGameManager : MonoBehaviour
     private bool IsMoveLegal(int from, int to)
     {
         Piece movingPiece =
-            board.GetPiece(from);
+            engine.board.GetPiece(from);
 
         if (movingPiece.IsEmpty())
             return false;
@@ -1281,7 +1472,7 @@ public class ChessGameManager : MonoBehaviour
 
         List<Move> moves =
             MoveGenerator.GenerateMoves(
-                board,
+                engine.board,
                 from,
                 enPassantSquare
             );
@@ -1302,7 +1493,7 @@ public class ChessGameManager : MonoBehaviour
 
         // Create temporary board
         Board testBoard =
-            board.Copy();
+            engine.board.Copy();
 
         // Apply the move to the temporary board
         testBoard.MakeMove(
@@ -1342,7 +1533,7 @@ public class ChessGameManager : MonoBehaviour
 
         for (int square = 0; square < 64; square++)
         {
-            Piece piece = board.GetPiece(square);
+            Piece piece = engine.board.GetPiece(square);
 
             // Ignore empty squares
             if (piece.IsEmpty())
@@ -1354,7 +1545,7 @@ public class ChessGameManager : MonoBehaviour
 
             List<Move> pseudoLegalMoves =
                 MoveGenerator.GenerateMoves(
-                    board,
+                    engine.board,
                     square,
                     enPassantSquare
                 );
@@ -1376,7 +1567,7 @@ public class ChessGameManager : MonoBehaviour
     private GameState GetGameState()
     {
         bool inCheck =
-            IsKingInCheck(currentTurn);
+            engine.IsKingInCheck(currentTurn);
 
         List<Move> legalMoves =
             GetAllLegalMoves(currentTurn);
@@ -1419,7 +1610,7 @@ public class ChessGameManager : MonoBehaviour
     {
         ClearMoveHints();
 
-        Piece piece = board.GetPiece(from);
+        Piece piece = engine.board.GetPiece(from);
 
         if (piece.IsEmpty())
             return;
@@ -1427,7 +1618,7 @@ public class ChessGameManager : MonoBehaviour
         // Normal piece moves
         List<Move> moves =
             MoveGenerator.GenerateMoves(
-                board,
+                engine.board,
                 from,
                 enPassantSquare
             );
@@ -1528,7 +1719,7 @@ public class ChessGameManager : MonoBehaviour
 
         // King must currently exist there
         Piece king =
-            board.GetPiece(from);
+            engine.board.GetPiece(from);
 
         if (king.type != PieceType.King ||
             king.color != color)
@@ -1537,7 +1728,7 @@ public class ChessGameManager : MonoBehaviour
         }
 
         // King cannot castle while in check
-        if (IsKingInCheck(color))
+        if (engine.IsKingInCheck(color))
             return false;
 
         // Determine squares
@@ -1549,7 +1740,7 @@ public class ChessGameManager : MonoBehaviour
 
         // King cannot pass through an attacked square
         if (AttackDetector.IsSquareAttacked(
-            board,
+            engine.board,
             middleSquare,
             GetOpponentColor(color)))
         {
@@ -1558,7 +1749,7 @@ public class ChessGameManager : MonoBehaviour
 
         // King cannot land on an attacked square
         if (AttackDetector.IsSquareAttacked(
-            board,
+            engine.board,
             to,
             GetOpponentColor(color)))
         {
@@ -1572,7 +1763,7 @@ public class ChessGameManager : MonoBehaviour
                 : from - 4;
 
         Piece rook =
-            board.GetPiece(rookSquare);
+            engine.board.GetPiece(rookSquare);
 
         if (rook.type != PieceType.Rook ||
             rook.color != color)
@@ -1583,17 +1774,17 @@ public class ChessGameManager : MonoBehaviour
         // Make sure the squares between King and Rook are empty
         if (kingside)
         {
-            if (!board.GetPiece(from + 1).IsEmpty() ||
-                !board.GetPiece(from + 2).IsEmpty())
+            if (!engine.board.GetPiece(from + 1).IsEmpty() ||
+                !engine.board.GetPiece(from + 2).IsEmpty())
             {
                 return false;
             }
         }
         else
         {
-            if (!board.GetPiece(from - 1).IsEmpty() ||
-                !board.GetPiece(from - 2).IsEmpty() ||
-                !board.GetPiece(from - 3).IsEmpty())
+            if (!engine.board.GetPiece(from - 1).IsEmpty() ||
+                !engine.board.GetPiece(from - 2).IsEmpty() ||
+                !engine.board.GetPiece(from - 3).IsEmpty())
             {
                 return false;
             }
@@ -1643,7 +1834,7 @@ public class ChessGameManager : MonoBehaviour
 
         rookView.SetSquare(rookTo);
 
-        board.MakeMove(
+        engine.board.MakeMove(
             new Move(
                 rookFrom,
                 rookTo
