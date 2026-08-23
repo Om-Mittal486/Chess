@@ -74,9 +74,46 @@ public class ChessGameManager : MonoBehaviour
     private void Start()
     {
         engine = new ChessEngine();
+
+        currentTurn = PieceColor.White;
+        enPassantSquare = -1;
+
+        whiteKingMoved = false;
+        blackKingMoved = false;
+
+        whiteKingsideRookMoved = false;
+        whiteQueensideRookMoved = false;
+
+        blackKingsideRookMoved = false;
+        blackQueensideRookMoved = false;
+
+        SyncEngineState();
+
         RecordPosition();
         UpdatePositionHash();
         SpawnPieces();
+    }
+
+    private void SyncEngineState()
+    {
+        if (engine == null)
+            return;
+
+        engine.currentTurn = currentTurn;
+        engine.enPassantSquare = enPassantSquare;
+
+        engine.whiteKingMoved = whiteKingMoved;
+        engine.blackKingMoved = blackKingMoved;
+
+        engine.whiteKingsideRookMoved =
+            whiteKingsideRookMoved;
+        engine.whiteQueensideRookMoved =
+            whiteQueensideRookMoved;
+
+        engine.blackKingsideRookMoved =
+            blackKingsideRookMoved;
+        engine.blackQueensideRookMoved =
+            blackQueensideRookMoved;
     }
 
     private void UpdatePositionHash()
@@ -430,6 +467,8 @@ public class ChessGameManager : MonoBehaviour
 
         selectedSquare = square;
 
+        SyncEngineState();
+
         Debug.Log(
             "Selected: " +
             GetSquareName(square)
@@ -458,6 +497,9 @@ public class ChessGameManager : MonoBehaviour
             ClearMoveHints();
             return;
         }
+
+        // Synchronize engine state before validating the move.
+        SyncEngineState();
 
         // Check whether the move is legal
         if (!engine.IsMoveLegal(selectedSquare, square))
@@ -584,6 +626,8 @@ public class ChessGameManager : MonoBehaviour
             selectedSquare,
             movingPiece
         );
+
+        SyncEngineState();
 
         // Handle castling rook movement
         if (move.Type == MoveType.CastleKingSide)
@@ -1022,6 +1066,8 @@ public class ChessGameManager : MonoBehaviour
         currentTurn =
             state.previousTurn;
 
+        SyncEngineState();
+
 
         gameOver =
             state.previousGameOver;
@@ -1381,21 +1427,20 @@ public class ChessGameManager : MonoBehaviour
 
     private void SwitchTurn()
     {
-        if (currentTurn == PieceColor.White)
-        {
-            currentTurn = PieceColor.Black;
-        }
-        else
-        {
-            currentTurn = PieceColor.White;
-        }
+        currentTurn =
+            currentTurn == PieceColor.White
+                ? PieceColor.Black
+                : PieceColor.White;
+
+        SyncEngineState();
 
         Debug.Log(
             "Turn: " +
             currentTurn
         );
 
-        currentGameState = GetGameState();
+        currentGameState =
+            engine.GetGameState();
 
         Debug.Log(
             "Game State: " +
@@ -1403,191 +1448,23 @@ public class ChessGameManager : MonoBehaviour
         );
     }
 
-    private bool IsKingInCheck(
-        Board checkBoard,
-        PieceColor color)
-    {
-        int kingSquare = -1;
-
-
-        for (int square = 0;
-            square < 64;
-            square++)
-        {
-            Piece piece =
-                checkBoard.GetPiece(square);
-
-
-            if (piece.type == PieceType.King &&
-                piece.color == color)
-            {
-                kingSquare = square;
-                break;
-            }
-        }
-
-
-        if (kingSquare == -1)
-            return false;
-
-
-        PieceColor enemyColor =
-            color == PieceColor.White
-                ? PieceColor.Black
-                : PieceColor.White;
-
-
-        return AttackDetector.IsSquareAttacked(
-            checkBoard,
-            kingSquare,
-            enemyColor
-        );
-    }
 
     private bool IsMoveLegal(int from, int to)
     {
-        Piece movingPiece =
-            engine.board.GetPiece(from);
-
-        if (movingPiece.IsEmpty())
-            return false;
-
-        // -------------------------------------------------
-        // CASTLING
-        // -------------------------------------------------
-
-        if (movingPiece.type == PieceType.King &&
-            Mathf.Abs(to - from) == 2)
-        {
-            return IsCastlingLegal(
-                from,
-                to,
-                movingPiece.color
-            );
-        }
-
-        // -------------------------------------------------
-        // NORMAL MOVES
-        // -------------------------------------------------
-
-        List<Move> moves =
-            MoveGenerator.GenerateMoves(
-                engine.board,
-                from,
-                enPassantSquare
-            );
-
-        bool pseudoLegal = false;
-
-        foreach (Move move in moves)
-        {
-            if (move.To == to)
-            {
-                pseudoLegal = true;
-                break;
-            }
-        }
-
-        if (!pseudoLegal)
-            return false;
-
-        // Create temporary board
-        Board testBoard =
-            engine.board.Copy();
-
-        // Apply the move to the temporary board
-        testBoard.MakeMove(
-            new Move(from, to)
-        );
-
-        // En Passant requires removing the pawn
-        // that was captured beside the destination.
-        if (movingPiece.type == PieceType.Pawn &&
-            to == enPassantSquare &&
-            Mathf.Abs(to - from) != 8)
-        {
-            int capturedSquare =
-                movingPiece.color == PieceColor.White
-                    ? to - 8
-                    : to + 8;
-
-            testBoard.RemovePiece(
-                capturedSquare
-            );
-        }
-
-        // Make sure our own King isn't left in check
-        if (IsKingInCheck(
-            testBoard,
-            movingPiece.color))
-        {
-            return false;
-        }
-
-        return true;
+        SyncEngineState();
+        return engine.IsMoveLegal(from, to);
     }
 
     private List<Move> GetAllLegalMoves(PieceColor color)
     {
-        List<Move> legalMoves = new List<Move>();
-
-        for (int square = 0; square < 64; square++)
-        {
-            Piece piece = engine.board.GetPiece(square);
-
-            // Ignore empty squares
-            if (piece.IsEmpty())
-                continue;
-
-            // Ignore opponent pieces
-            if (piece.color != color)
-                continue;
-
-            List<Move> pseudoLegalMoves =
-                MoveGenerator.GenerateMoves(
-                    engine.board,
-                    square,
-                    enPassantSquare
-                );
-
-            foreach (Move move in pseudoLegalMoves)
-            {
-                if (IsMoveLegal(
-                    move.From,
-                    move.To))
-                {
-                    legalMoves.Add(move);
-                }
-            }
-        }
-
-        return legalMoves;
+        SyncEngineState();
+        return engine.GetAllLegalMoves(color);
     }
 
     private GameState GetGameState()
     {
-        bool inCheck =
-            engine.IsKingInCheck(currentTurn);
-
-        List<Move> legalMoves =
-            GetAllLegalMoves(currentTurn);
-
-        if (legalMoves.Count == 0)
-        {
-            if (inCheck)
-            {
-                return GameState.Checkmate;
-            }
-
-            return GameState.Stalemate;
-        }
-
-        if (inCheck)
-        {
-            return GameState.Check;
-        }
-
-        return GameState.Playing;
+        SyncEngineState();
+        return engine.GetGameState();
     }
 
     public void RegisterSquareView(
@@ -1610,71 +1487,24 @@ public class ChessGameManager : MonoBehaviour
     {
         ClearMoveHints();
 
-        Piece piece = engine.board.GetPiece(from);
+        SyncEngineState();
+
+        Piece piece =
+            engine.board.GetPiece(from);
 
         if (piece.IsEmpty())
             return;
 
-        // Normal piece moves
         List<Move> moves =
-            MoveGenerator.GenerateMoves(
-                engine.board,
-                from,
-                enPassantSquare
-            );
+            engine.GetLegalMoves(from);
 
         foreach (Move move in moves)
         {
-            if (IsMoveLegal(
-                move.From,
-                move.To))
+            if (squareViews.TryGetValue(
+                move.To,
+                out SquareView squareView))
             {
-                if (squareViews.TryGetValue(
-                    move.To,
-                    out SquareView squareView))
-                {
-                    squareView.ShowMoveHint();
-                }
-            }
-        }
-
-        // -------------------------------------------------
-        // CASTLING
-        // -------------------------------------------------
-
-        if (piece.type == PieceType.King)
-        {
-            int kingSquare = from;
-
-            int kingsideSquare = from + 2;
-            int queensideSquare = from - 2;
-
-            // Kingside
-            if (IsCastlingLegal(
-                from,
-                kingsideSquare,
-                piece.color))
-            {
-                if (squareViews.TryGetValue(
-                    kingsideSquare,
-                    out SquareView squareView))
-                {
-                    squareView.ShowMoveHint();
-                }
-            }
-
-            // Queenside
-            if (IsCastlingLegal(
-                from,
-                queensideSquare,
-                piece.color))
-            {
-                if (squareViews.TryGetValue(
-                    queensideSquare,
-                    out SquareView squareView))
-                {
-                    squareView.ShowMoveHint();
-                }
+                squareView.ShowMoveHint();
             }
         }
     }
@@ -1684,113 +1514,13 @@ public class ChessGameManager : MonoBehaviour
         int to,
         PieceColor color)
     {
-        bool kingside = to > from;
+        SyncEngineState();
 
-        bool kingMoved =
-            color == PieceColor.White
-                ? whiteKingMoved
-                : blackKingMoved;
-
-        bool rookMoved;
-
-        if (color == PieceColor.White)
-        {
-            rookMoved = kingside
-                ? whiteKingsideRookMoved
-                : whiteQueensideRookMoved;
-        }
-        else
-        {
-            rookMoved = kingside
-                ? blackKingsideRookMoved
-                : blackQueensideRookMoved;
-        }
-
-        // King or required rook already moved
-        if (kingMoved || rookMoved)
-            return false;
-
-        // King must currently be on its starting square
-        int expectedKingSquare =
-            color == PieceColor.White ? 4 : 60;
-
-        if (from != expectedKingSquare)
-            return false;
-
-        // King must currently exist there
-        Piece king =
-            engine.board.GetPiece(from);
-
-        if (king.type != PieceType.King ||
-            king.color != color)
-        {
-            return false;
-        }
-
-        // King cannot castle while in check
-        if (engine.IsKingInCheck(color))
-            return false;
-
-        // Determine squares
-        int direction =
-            kingside ? 1 : -1;
-
-        int middleSquare =
-            from + direction;
-
-        // King cannot pass through an attacked square
-        if (AttackDetector.IsSquareAttacked(
-            engine.board,
-            middleSquare,
-            GetOpponentColor(color)))
-        {
-            return false;
-        }
-
-        // King cannot land on an attacked square
-        if (AttackDetector.IsSquareAttacked(
-            engine.board,
+        return engine.IsCastlingLegal(
+            from,
             to,
-            GetOpponentColor(color)))
-        {
-            return false;
-        }
-
-        // Make sure the correct rook exists
-        int rookSquare =
-            kingside
-                ? from + 3
-                : from - 4;
-
-        Piece rook =
-            engine.board.GetPiece(rookSquare);
-
-        if (rook.type != PieceType.Rook ||
-            rook.color != color)
-        {
-            return false;
-        }
-
-        // Make sure the squares between King and Rook are empty
-        if (kingside)
-        {
-            if (!engine.board.GetPiece(from + 1).IsEmpty() ||
-                !engine.board.GetPiece(from + 2).IsEmpty())
-            {
-                return false;
-            }
-        }
-        else
-        {
-            if (!engine.board.GetPiece(from - 1).IsEmpty() ||
-                !engine.board.GetPiece(from - 2).IsEmpty() ||
-                !engine.board.GetPiece(from - 3).IsEmpty())
-            {
-                return false;
-            }
-        }
-
-        return true;
+            color
+        );
     }
 
     private PieceColor GetOpponentColor(
