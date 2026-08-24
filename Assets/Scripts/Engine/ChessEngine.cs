@@ -702,4 +702,9 @@ public class ChessEngine
 
         return false;
     }
+
+    public int EvaluatePosition()
+    {
+        return EvaluationFunction.Evaluate(board);
+    }
 }

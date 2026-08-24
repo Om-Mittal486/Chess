@@ -71,6 +71,15 @@ public class ChessGameManager : MonoBehaviour
 
     private ulong currentPositionHash;
 
+    private void Update(){
+        int evaluation = engine.EvaluatePosition();
+
+        Debug.Log(
+            "Position Evaluation: " +
+            evaluation
+        );
+    }
+
     private void Start()
     {
         engine = new ChessEngine();
