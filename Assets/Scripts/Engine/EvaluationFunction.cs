@@ -15,14 +15,34 @@ public static class EvaluationFunction
     public const int KingValue = 0;
 
 
-    // =====================================================score += EvaluateMobility(board);
+    // =====================================================
+    // MOBILITY
+    // =====================================================
+
+    private const int MobilityWeight = 5;
+
+
+    // =====================================================
+    // KING SAFETY
+    // =====================================================
+
+    private const int KingAttackWeight = 15;
+    private const int PawnShieldWeight = 10;
+    private const int CheckPenalty = 100;
+
+
+    // =====================================================
+    // PAWN STRUCTURE
+    // =====================================================
+
+    private const int DoubledPawnPenalty = 15;
+    private const int IsolatedPawnPenalty = 15;
+    private const int PassedPawnBonus = 25;
+    private const int ConnectedPawnBonus = 10;
+
+
+    // =====================================================
     // PIECE-SQUARE TABLES
-    //
-    // Values are written from White's perspective,
-    // starting from White's back rank.
-    //
-    // Positive = good square
-    // Negative = bad square
     // =====================================================
 
     private static readonly int[] PawnTable =
@@ -82,8 +102,8 @@ public static class EvaluationFunction
         -20, -10, -10,   0,   0, -10, -10, -20,
         -10,   0,   0,   0,   0,   0,   0, -10,
         -10,   0,   5,   5,   5,   5,   0, -10,
-          0,   0,   5,   5,   5,   5,   0,   -5,
-          0,   0,   5,   5,   5,   5,   0,   -5,
+          0,   0,   5,   5,   5,   5,   0,  -5,
+          0,   0,   5,   5,   5,   5,   0,  -5,
         -10,   5,   5,   5,   5,   5,   0, -10,
         -10,   0,   5,   0,   0,   0,   0, -10,
         -20, -10, -10,   0,   0, -10, -10, -20
@@ -107,14 +127,22 @@ public static class EvaluationFunction
     // MAIN EVALUATION
     // =====================================================
 
-    public static int Evaluate(Board board)
+    public static int Evaluate(
+        Board board
+    )
     {
         int score = 0;
 
 
-        for (int square = 0;
-             square < Board.SquareCount;
-             square++)
+        // -------------------------------------------------
+        // MATERIAL + PIECE-SQUARE TABLES
+        // -------------------------------------------------
+
+        for (
+            int square = 0;
+            square < Board.SquareCount;
+            square++
+        )
         {
             Piece piece =
                 board.GetPiece(square);
@@ -125,7 +153,9 @@ public static class EvaluationFunction
 
 
             int materialValue =
-                GetPieceValue(piece.type);
+                GetPieceValue(
+                    piece.type
+                );
 
 
             int positionalValue =
@@ -140,8 +170,10 @@ public static class EvaluationFunction
                 positionalValue;
 
 
-            if (piece.color ==
-                PieceColor.White)
+            if (
+                piece.color ==
+                PieceColor.White
+            )
             {
                 score += totalValue;
             }
@@ -151,7 +183,37 @@ public static class EvaluationFunction
             }
         }
 
-        score += EvaluateMobility(board);
+
+        // -------------------------------------------------
+        // MOBILITY
+        // -------------------------------------------------
+
+        score +=
+            EvaluateMobility(
+                board
+            );
+
+
+        // -------------------------------------------------
+        // KING SAFETY
+        // -------------------------------------------------
+
+        score +=
+            EvaluateKingSafety(
+                board
+            );
+
+
+        // -------------------------------------------------
+        // PAWN STRUCTURE
+        // -------------------------------------------------
+
+        score +=
+            EvaluatePawnStructure(
+                board
+            );
+
+
         return score;
     }
 
@@ -248,24 +310,25 @@ public static class EvaluationFunction
             square / 8;
 
 
-        // Flip the board for Black so
-        // both sides use the same table
-        // from their own perspective.
-
-        if (color == PieceColor.Black)
+        if (
+            color ==
+            PieceColor.Black
+        )
         {
-            rank = 7 - rank;
+            rank =
+                7 - rank;
         }
 
 
-        return rank * 8 + file;
+        return
+            rank * 8 +
+            file;
     }
 
-    // =====================================================
-    // MOBILITY
-    // =====================================================
 
-    private const int MobilityWeight = 5;
+    // =====================================================
+    // MOBILITY EVALUATION
+    // =====================================================
 
     private static int EvaluateMobility(
         Board board
@@ -274,15 +337,20 @@ public static class EvaluationFunction
         int whiteMoves = 0;
         int blackMoves = 0;
 
-        for (int square = 0;
+
+        for (
+            int square = 0;
             square < Board.SquareCount;
-            square++)
+            square++
+        )
         {
             Piece piece =
                 board.GetPiece(square);
 
+
             if (piece.IsEmpty())
                 continue;
+
 
             List<Move> moves =
                 MoveGenerator.GenerateMoves(
@@ -291,18 +359,727 @@ public static class EvaluationFunction
                     -1
                 );
 
-            if (piece.color == PieceColor.White)
+
+            if (
+                piece.color ==
+                PieceColor.White
+            )
             {
-                whiteMoves += moves.Count;
+                whiteMoves +=
+                    moves.Count;
             }
             else
             {
-                blackMoves += moves.Count;
+                blackMoves +=
+                    moves.Count;
             }
         }
 
+
         return
-            (whiteMoves - blackMoves)
+            (
+                whiteMoves -
+                blackMoves
+            )
             * MobilityWeight;
+    }
+
+
+    // =====================================================
+    // KING SAFETY
+    // =====================================================
+
+    private static int EvaluateKingSafety(
+        Board board
+    )
+    {
+        int score = 0;
+
+
+        score +=
+            EvaluateKingSafetyForColor(
+                board,
+                PieceColor.White
+            );
+
+
+        score +=
+            EvaluateKingSafetyForColor(
+                board,
+                PieceColor.Black
+            );
+
+
+        return score;
+    }
+
+
+    private static int EvaluateKingSafetyForColor(
+        Board board,
+        PieceColor color
+    )
+    {
+        int kingSquare =
+            FindKing(
+                board,
+                color
+            );
+
+
+        if (kingSquare == -1)
+            return 0;
+
+
+        PieceColor enemyColor =
+            color == PieceColor.White
+                ? PieceColor.Black
+                : PieceColor.White;
+
+
+        int score = 0;
+
+
+        // -------------------------------------------------
+        // CHECK PENALTY
+        // -------------------------------------------------
+
+        if (
+            IsSquareAttacked(
+                board,
+                kingSquare,
+                enemyColor
+            )
+        )
+        {
+            score -=
+                CheckPenalty;
+        }
+
+
+        // -------------------------------------------------
+        // ATTACKS AROUND KING
+        // -------------------------------------------------
+
+        int kingFile =
+            kingSquare % 8;
+
+        int kingRank =
+            kingSquare / 8;
+
+
+        int enemyAttacks = 0;
+
+
+        for (
+            int fileOffset = -1;
+            fileOffset <= 1;
+            fileOffset++
+        )
+        {
+            for (
+                int rankOffset = -1;
+                rankOffset <= 1;
+                rankOffset++
+            )
+            {
+                if (
+                    fileOffset == 0 &&
+                    rankOffset == 0
+                )
+                {
+                    continue;
+                }
+
+
+                int file =
+                    kingFile +
+                    fileOffset;
+
+                int rank =
+                    kingRank +
+                    rankOffset;
+
+
+                if (
+                    file < 0 ||
+                    file >= 8 ||
+                    rank < 0 ||
+                    rank >= 8
+                )
+                {
+                    continue;
+                }
+
+
+                int square =
+                    rank * 8 +
+                    file;
+
+
+                if (
+                    IsSquareAttacked(
+                        board,
+                        square,
+                        enemyColor
+                    )
+                )
+                {
+                    enemyAttacks++;
+                }
+            }
+        }
+
+
+        score -=
+            enemyAttacks *
+            KingAttackWeight;
+
+
+        // -------------------------------------------------
+        // PAWN SHIELD
+        // -------------------------------------------------
+
+        int shield =
+            CountPawnShield(
+                board,
+                kingSquare,
+                color
+            );
+
+
+        score +=
+            shield *
+            PawnShieldWeight;
+
+
+        // Convert Black's safety
+        // into White-positive scoring.
+
+        if (
+            color ==
+            PieceColor.Black
+        )
+        {
+            score = -score;
+        }
+
+
+        return score;
+    }
+
+
+    // =====================================================
+    // FIND KING
+    // =====================================================
+
+    private static int FindKing(
+        Board board,
+        PieceColor color
+    )
+    {
+        for (
+            int square = 0;
+            square < Board.SquareCount;
+            square++
+        )
+        {
+            Piece piece =
+                board.GetPiece(square);
+
+
+            if (
+                !piece.IsEmpty() &&
+                piece.type == PieceType.King &&
+                piece.color == color
+            )
+            {
+                return square;
+            }
+        }
+
+
+        return -1;
+    }
+
+
+    // =====================================================
+    // ATTACK DETECTION
+    // =====================================================
+
+    private static bool IsSquareAttacked(
+        Board board,
+        int square,
+        PieceColor attacker
+    )
+    {
+        return
+            AttackDetector.IsSquareAttacked(
+                board,
+                square,
+                attacker
+            );
+    }
+
+
+    // =====================================================
+    // PAWN SHIELD
+    // =====================================================
+
+    private static int CountPawnShield(
+        Board board,
+        int kingSquare,
+        PieceColor color
+    )
+    {
+        int kingFile =
+            kingSquare % 8;
+
+        int kingRank =
+            kingSquare / 8;
+
+
+        int direction =
+            color == PieceColor.White
+                ? 1
+                : -1;
+
+
+        int pawnRank =
+            kingRank +
+            direction;
+
+
+        if (
+            pawnRank < 0 ||
+            pawnRank >= 8
+        )
+        {
+            return 0;
+        }
+
+
+        int shield = 0;
+
+
+        for (
+            int fileOffset = -1;
+            fileOffset <= 1;
+            fileOffset++
+        )
+        {
+            int file =
+                kingFile +
+                fileOffset;
+
+
+            if (
+                file < 0 ||
+                file >= 8
+            )
+            {
+                continue;
+            }
+
+
+            int square =
+                pawnRank * 8 +
+                file;
+
+
+            Piece piece =
+                board.GetPiece(square);
+
+
+            if (
+                !piece.IsEmpty() &&
+                piece.type == PieceType.Pawn &&
+                piece.color == color
+            )
+            {
+                shield++;
+            }
+        }
+
+
+        return shield;
+    }
+
+
+    // =====================================================
+    // PAWN STRUCTURE
+    // =====================================================
+
+    private static int EvaluatePawnStructure(
+        Board board
+    )
+    {
+        int whiteScore =
+            EvaluatePawnStructureForColor(
+                board,
+                PieceColor.White
+            );
+
+
+        int blackScore =
+            EvaluatePawnStructureForColor(
+                board,
+                PieceColor.Black
+            );
+
+
+        return
+            whiteScore -
+            blackScore;
+    }
+
+
+    // =====================================================
+    // PAWN STRUCTURE FOR ONE COLOR
+    // =====================================================
+
+    private static int EvaluatePawnStructureForColor(
+        Board board,
+        PieceColor color
+    )
+    {
+        int score = 0;
+
+
+        int[] pawnsPerFile =
+            new int[8];
+
+
+        // -------------------------------------------------
+        // COUNT PAWNS ON EACH FILE
+        // -------------------------------------------------
+
+        for (
+            int square = 0;
+            square < Board.SquareCount;
+            square++
+        )
+        {
+            Piece piece =
+                board.GetPiece(square);
+
+
+            if (
+                !piece.IsEmpty() &&
+                piece.type == PieceType.Pawn &&
+                piece.color == color
+            )
+            {
+                int file =
+                    square % 8;
+
+
+                pawnsPerFile[file]++;
+            }
+        }
+
+
+        // -------------------------------------------------
+        // DOUBLED PAWNS
+        // -------------------------------------------------
+
+        for (
+            int file = 0;
+            file < 8;
+            file++
+        )
+        {
+            if (
+                pawnsPerFile[file] > 1
+            )
+            {
+                int extraPawns =
+                    pawnsPerFile[file] - 1;
+
+
+                score -=
+                    extraPawns *
+                    DoubledPawnPenalty;
+            }
+        }
+
+
+        // -------------------------------------------------
+        // INDIVIDUAL PAWNS
+        // -------------------------------------------------
+
+        for (
+            int square = 0;
+            square < Board.SquareCount;
+            square++
+        )
+        {
+            Piece piece =
+                board.GetPiece(square);
+
+
+            if (
+                piece.IsEmpty() ||
+                piece.type != PieceType.Pawn ||
+                piece.color != color
+            )
+            {
+                continue;
+            }
+
+
+            int file =
+                square % 8;
+
+            int rank =
+                square / 8;
+
+
+            // -------------------------------------------------
+            // ISOLATED PAWN
+            // -------------------------------------------------
+
+            bool hasAdjacentPawn =
+                false;
+
+
+            if (
+                file > 0 &&
+                pawnsPerFile[file - 1] > 0
+            )
+            {
+                hasAdjacentPawn = true;
+            }
+
+
+            if (
+                file < 7 &&
+                pawnsPerFile[file + 1] > 0
+            )
+            {
+                hasAdjacentPawn = true;
+            }
+
+
+            if (!hasAdjacentPawn)
+            {
+                score -=
+                    IsolatedPawnPenalty;
+            }
+
+
+            // -------------------------------------------------
+            // PASSED PAWN
+            // -------------------------------------------------
+
+            if (
+                IsPassedPawn(
+                    board,
+                    file,
+                    rank,
+                    color
+                )
+            )
+            {
+                score +=
+                    PassedPawnBonus;
+            }
+
+
+            // -------------------------------------------------
+            // CONNECTED PAWN
+            // -------------------------------------------------
+
+            if (
+                HasAdjacentPawn(
+                    board,
+                    file,
+                    rank,
+                    color
+                )
+            )
+            {
+                score +=
+                    ConnectedPawnBonus;
+            }
+        }
+
+
+        return score;
+    }
+
+
+    // =====================================================
+    // PASSED PAWN
+    // =====================================================
+
+    private static bool IsPassedPawn(
+        Board board,
+        int file,
+        int rank,
+        PieceColor color
+    )
+    {
+        PieceColor enemyColor =
+            color == PieceColor.White
+                ? PieceColor.Black
+                : PieceColor.White;
+
+
+        int direction =
+            color == PieceColor.White
+                ? 1
+                : -1;
+
+
+        int currentRank =
+            rank +
+            direction;
+
+
+        while (
+            currentRank >= 0 &&
+            currentRank < 8
+        )
+        {
+            for (
+                int fileOffset = -1;
+                fileOffset <= 1;
+                fileOffset++
+            )
+            {
+                int checkFile =
+                    file +
+                    fileOffset;
+
+
+                if (
+                    checkFile < 0 ||
+                    checkFile >= 8
+                )
+                {
+                    continue;
+                }
+
+
+                int square =
+                    currentRank * 8 +
+                    checkFile;
+
+
+                Piece piece =
+                    board.GetPiece(square);
+
+
+                if (
+                    !piece.IsEmpty() &&
+                    piece.type == PieceType.Pawn &&
+                    piece.color == enemyColor
+                )
+                {
+                    return false;
+                }
+            }
+
+
+            currentRank +=
+                direction;
+        }
+
+
+        return true;
+    }
+
+
+    // =====================================================
+    // CONNECTED PAWN
+    // =====================================================
+
+    private static bool HasAdjacentPawn(
+        Board board,
+        int file,
+        int rank,
+        PieceColor color
+    )
+    {
+        int[] adjacentFiles =
+        {
+            file - 1,
+            file + 1
+        };
+
+
+        foreach (
+            int adjacentFile
+            in adjacentFiles
+        )
+        {
+            if (
+                adjacentFile < 0 ||
+                adjacentFile >= 8
+            )
+            {
+                continue;
+            }
+
+
+            // Same rank
+            int square =
+                rank * 8 +
+                adjacentFile;
+
+
+            Piece piece =
+                board.GetPiece(square);
+
+
+            if (
+                !piece.IsEmpty() &&
+                piece.type == PieceType.Pawn &&
+                piece.color == color
+            )
+            {
+                return true;
+            }
+
+
+            // One rank forward
+            int direction =
+                color == PieceColor.White
+                    ? 1
+                    : -1;
+
+
+            int forwardRank =
+                rank +
+                direction;
+
+
+            if (
+                forwardRank >= 0 &&
+                forwardRank < 8
+            )
+            {
+                square =
+                    forwardRank * 8 +
+                    adjacentFile;
+
+
+                piece =
+                    board.GetPiece(square);
+
+
+                if (
+                    !piece.IsEmpty() &&
+                    piece.type == PieceType.Pawn &&
+                    piece.color == color
+                )
+                {
+                    return true;
+                }
+            }
+        }
+
+
+        return false;
     }
 }

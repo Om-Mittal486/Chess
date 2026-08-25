@@ -30,6 +30,7 @@ public class ChessGameManager : MonoBehaviour
     [SerializeField] private GameObject blackPromotionPanel;
 
     private ChessEngine engine;
+    private ChessAI chessAI;
 
     // Currently selected piece
     private int selectedSquare = -1;
@@ -71,15 +72,6 @@ public class ChessGameManager : MonoBehaviour
 
     private ulong currentPositionHash;
 
-    private void Update(){
-        int evaluation = engine.EvaluatePosition();
-
-        Debug.Log(
-            "Position Evaluation: " +
-            evaluation
-        );
-    }
-
     private void Start()
     {
         engine = new ChessEngine();
@@ -97,6 +89,9 @@ public class ChessGameManager : MonoBehaviour
         blackQueensideRookMoved = false;
 
         SyncEngineState();
+
+        chessAI = new ChessAI(engine);
+        chessAI.SearchDepth = 3;
 
         RecordPosition();
         UpdatePositionHash();
@@ -324,6 +319,34 @@ public class ChessGameManager : MonoBehaviour
 
         return key.ToString();
     }
+
+    // =====================================================
+    // AI TEST
+    // =====================================================
+
+    public void TestAIMove()
+    {
+        if (gameOver)
+        {
+            Debug.Log("AI test skipped: game is over.");
+            return;
+        }
+
+        SyncEngineState();
+
+        Move bestMove =
+            chessAI.FindBestMove();
+
+        Debug.Log(
+            "AI selected: " +
+            GetSquareName(bestMove.From) +
+            " -> " +
+            GetSquareName(bestMove.To) +
+            " | Type: " +
+            bestMove.Type
+        );
+    }
+
 
     public void PromoteToQueen()
     {
