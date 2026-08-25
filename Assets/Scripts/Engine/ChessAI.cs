@@ -1,29 +1,29 @@
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 
 public class ChessAI
 {
     private const int MateScore = 1000000;
-
-    // -----------------------------------------------------
-    // SEARCH SETTINGS
-    // -----------------------------------------------------
-
-    // Start with 4.
-    //
-    // Depth 4 with Alpha-Beta should be considerably
-    // stronger than the previous depth 3 Minimax.
-    //
-    // Later, after optimization:
-    // 5 -> 6 -> 7+
-    public int SearchDepth = 4;
-
+    private const int DrawContempt = 35;
 
     private ChessEngine engine;
 
+    // Maximum search depth.
+    public int SearchDepth = 8;
 
-    public ChessAI(
-        ChessEngine engine
-    )
+    // Maximum thinking time.
+    public int ThinkTimeMilliseconds = 1500;
+
+    private Stopwatch searchTimer;
+    private bool searchTimedOut;
+
+    // Positions currently present in the AI's search line.
+    private Dictionary<string, int> searchRepetitions =
+        new Dictionary<string, int>();
+
+
+    public ChessAI(ChessEngine engine)
     {
         this.engine = engine;
     }
@@ -38,96 +38,157 @@ public class ChessAI
         PieceColor aiColor =
             engine.currentTurn;
 
-
         List<Move> legalMoves =
-            engine.GetAllLegalMoves(
-                aiColor
-            );
-
+            engine.GetAllLegalMoves(aiColor);
 
         if (legalMoves.Count == 0)
         {
             return default(Move);
         }
 
+        OrderMoves(engine, legalMoves);
 
-        // -------------------------------------------------
-        // ORDER MOVES
-        // -------------------------------------------------
-
-        OrderMoves(
-            engine,
-            legalMoves
-        );
-
-
-        Move bestMove =
-            legalMoves[0];
-
+        // Always have a legal fallback move.
+        Move bestMove = legalMoves[0];
 
         int bestScore =
             aiColor == PieceColor.White
                 ? int.MinValue
                 : int.MaxValue;
 
+        searchTimer = Stopwatch.StartNew();
+        searchTimedOut = false;
 
-        foreach (Move move in legalMoves)
+        searchRepetitions.Clear();
+
+        string rootKey =
+            GetPositionKey(engine);
+
+        searchRepetitions[rootKey] = 1;
+
+
+        // =================================================
+        // ITERATIVE DEEPENING
+        // =================================================
+
+        for (int depth = 1;
+             depth <= SearchDepth;
+             depth++)
         {
-            ChessEngine child =
-                CreateTestEngine();
-
-
-            child.MakeMove(move);
-
-
-            int score;
-
-
-            if (aiColor == PieceColor.White)
+            if (TimeExpired())
             {
-                score =
-                    AlphaBeta(
-                        child,
-                        SearchDepth - 1,
-                        int.MinValue + 1,
-                        int.MaxValue - 1,
-                        false
-                    );
+                break;
+            }
+
+            searchTimedOut = false;
+
+            Move iterationBestMove =
+                bestMove;
+
+            int iterationBestScore =
+                aiColor == PieceColor.White
+                    ? int.MinValue
+                    : int.MaxValue;
+
+            // Previous iteration's best move first.
+            MoveToFront(
+                legalMoves,
+                bestMove
+            );
 
 
-                if (score > bestScore)
+            foreach (Move move in legalMoves)
+            {
+                if (TimeExpired())
                 {
-                    bestScore = score;
-                    bestMove = move;
+                    searchTimedOut = true;
+                    break;
+                }
+
+                ChessEngine child =
+                    CreateTestEngine();
+
+                child.MakeMove(move);
+
+                string childKey =
+                    GetPositionKey(child);
+
+                int score;
+
+                if (IsSearchRepetition(childKey))
+                {
+                    score =
+                        GetDrawScore(child);
+                }
+                else
+                {
+                    AddSearchRepetition(childKey);
+
+                    score =
+                        AlphaBeta(
+                            child,
+                            depth - 1,
+                            int.MinValue + 1,
+                            int.MaxValue - 1,
+                            aiColor == PieceColor.Black
+                        );
+
+                    RemoveSearchRepetition(childKey);
+                }
+
+
+                if (searchTimedOut)
+                {
+                    break;
+                }
+
+
+                if (aiColor == PieceColor.White)
+                {
+                    if (score > iterationBestScore)
+                    {
+                        iterationBestScore = score;
+                        iterationBestMove = move;
+                    }
+                }
+                else
+                {
+                    if (score < iterationBestScore)
+                    {
+                        iterationBestScore = score;
+                        iterationBestMove = move;
+                    }
                 }
             }
-            else
+
+
+            // Only accept a completely finished iteration.
+            if (searchTimedOut)
             {
-                score =
-                    AlphaBeta(
-                        child,
-                        SearchDepth - 1,
-                        int.MinValue + 1,
-                        int.MaxValue - 1,
-                        true
-                    );
+                break;
+            }
+
+            bestMove = iterationBestMove;
+            bestScore = iterationBestScore;
 
 
-                if (score < bestScore)
-                {
-                    bestScore = score;
-                    bestMove = move;
-                }
+            // Stop early when a forced mate is found.
+            if (bestScore > MateScore - 1000 ||
+                bestScore < -MateScore + 1000)
+            {
+                break;
             }
         }
 
+
+        searchTimer.Stop();
 
         return bestMove;
     }
 
 
     // =====================================================
-    // ALPHA-BETA SEARCH
+    // ALPHA-BETA
     // =====================================================
 
     private int AlphaBeta(
@@ -138,13 +199,15 @@ public class ChessAI
         bool maximizingPlayer
     )
     {
-        // -------------------------------------------------
-        // GET LEGAL MOVES
-        // -------------------------------------------------
+        if (TimeExpired())
+        {
+            searchTimedOut = true;
+            return 0;
+        }
+
 
         PieceColor sideToMove =
             position.currentTurn;
-
 
         List<Move> legalMoves =
             position.GetAllLegalMoves(
@@ -152,9 +215,9 @@ public class ChessAI
             );
 
 
-        // -------------------------------------------------
+        // =================================================
         // CHECKMATE / STALEMATE
-        // -------------------------------------------------
+        // =================================================
 
         if (legalMoves.Count == 0)
         {
@@ -169,27 +232,19 @@ public class ChessAI
                     PieceColor.White
                 )
                 {
-                    return
-                        -MateScore -
-                        depth;
+                    return -MateScore - depth;
                 }
-                else
-                {
-                    return
-                        MateScore +
-                        depth;
-                }
+
+                return MateScore + depth;
             }
 
-
-            // Stalemate
-            return 0;
+            return GetDrawScore(position);
         }
 
 
-        // -------------------------------------------------
-        // QUIESCENCE AT LEAF
-        // -------------------------------------------------
+        // =================================================
+        // QUIESCENCE
+        // =================================================
 
         if (depth <= 0)
         {
@@ -203,19 +258,15 @@ public class ChessAI
         }
 
 
-        // -------------------------------------------------
-        // MOVE ORDERING
-        // -------------------------------------------------
-
         OrderMoves(
             position,
             legalMoves
         );
 
 
-        // -------------------------------------------------
-        // MAXIMIZING PLAYER
-        // -------------------------------------------------
+        // =================================================
+        // MAXIMIZING
+        // =================================================
 
         if (maximizingPlayer)
         {
@@ -225,23 +276,51 @@ public class ChessAI
 
             foreach (Move move in legalMoves)
             {
-                ChessEngine child =
-                    CreateTestEngine(
-                        position
-                    );
+                if (TimeExpired())
+                {
+                    searchTimedOut = true;
+                    return 0;
+                }
 
+
+                ChessEngine child =
+                    CreateTestEngine(position);
 
                 child.MakeMove(move);
 
 
-                int score =
-                    AlphaBeta(
-                        child,
-                        depth - 1,
-                        alpha,
-                        beta,
-                        false
-                    );
+                string childKey =
+                    GetPositionKey(child);
+
+                int score;
+
+
+                if (IsSearchRepetition(childKey))
+                {
+                    score =
+                        GetDrawScore(child);
+                }
+                else
+                {
+                    AddSearchRepetition(childKey);
+
+                    score =
+                        AlphaBeta(
+                            child,
+                            depth - 1,
+                            alpha,
+                            beta,
+                            false
+                        );
+
+                    RemoveSearchRepetition(childKey);
+                }
+
+
+                if (searchTimedOut)
+                {
+                    return 0;
+                }
 
 
                 if (score > bestScore)
@@ -256,10 +335,6 @@ public class ChessAI
                 }
 
 
-                // -------------------------------------------------
-                // BETA CUTOFF
-                // -------------------------------------------------
-
                 if (beta <= alpha)
                 {
                     break;
@@ -271,9 +346,9 @@ public class ChessAI
         }
 
 
-        // -------------------------------------------------
-        // MINIMIZING PLAYER
-        // -------------------------------------------------
+        // =================================================
+        // MINIMIZING
+        // =================================================
 
         int worstScore =
             int.MaxValue;
@@ -281,23 +356,51 @@ public class ChessAI
 
         foreach (Move move in legalMoves)
         {
-            ChessEngine child =
-                CreateTestEngine(
-                    position
-                );
+            if (TimeExpired())
+            {
+                searchTimedOut = true;
+                return 0;
+            }
 
+
+            ChessEngine child =
+                CreateTestEngine(position);
 
             child.MakeMove(move);
 
 
-            int score =
-                AlphaBeta(
-                    child,
-                    depth - 1,
-                    alpha,
-                    beta,
-                    true
-                );
+            string childKey =
+                GetPositionKey(child);
+
+            int score;
+
+
+            if (IsSearchRepetition(childKey))
+            {
+                score =
+                    GetDrawScore(child);
+            }
+            else
+            {
+                AddSearchRepetition(childKey);
+
+                score =
+                    AlphaBeta(
+                        child,
+                        depth - 1,
+                        alpha,
+                        beta,
+                        true
+                    );
+
+                RemoveSearchRepetition(childKey);
+            }
+
+
+            if (searchTimedOut)
+            {
+                return 0;
+            }
 
 
             if (score < worstScore)
@@ -311,10 +414,6 @@ public class ChessAI
                 beta = score;
             }
 
-
-            // -------------------------------------------------
-            // ALPHA CUTOFF
-            // -------------------------------------------------
 
             if (beta <= alpha)
             {
@@ -339,15 +438,18 @@ public class ChessAI
         int remainingDepth
     )
     {
+        if (TimeExpired())
+        {
+            searchTimedOut = true;
+            return 0;
+        }
+
+
         int standPat =
             EvaluationFunction.Evaluate(
                 position.board
             );
 
-
-        // -------------------------------------------------
-        // STOP QUIESCENCE
-        // -------------------------------------------------
 
         if (remainingDepth <= 0)
         {
@@ -355,9 +457,27 @@ public class ChessAI
         }
 
 
-        // -------------------------------------------------
+        List<Move> legalMoves =
+            position.GetAllLegalMoves(
+                position.currentTurn
+            );
+
+        List<Move> tacticalMoves =
+            GetTacticalMoves(
+                position,
+                legalMoves
+            );
+
+
+        OrderMoves(
+            position,
+            tacticalMoves
+        );
+
+
+        // =================================================
         // MAXIMIZING
-        // -------------------------------------------------
+        // =================================================
 
         if (maximizingPlayer)
         {
@@ -366,39 +486,23 @@ public class ChessAI
                 return beta;
             }
 
-
             if (standPat > alpha)
             {
                 alpha = standPat;
             }
 
 
-            List<Move> moves =
-                position.GetAllLegalMoves(
-                    position.currentTurn
-                );
-
-
-            List<Move> tacticalMoves =
-                GetTacticalMoves(
-                    position,
-                    moves
-                );
-
-
-            OrderMoves(
-                position,
-                tacticalMoves
-            );
-
-
             foreach (Move move in tacticalMoves)
             {
-                ChessEngine child =
-                    CreateTestEngine(
-                        position
-                    );
+                if (TimeExpired())
+                {
+                    searchTimedOut = true;
+                    return 0;
+                }
 
+
+                ChessEngine child =
+                    CreateTestEngine(position);
 
                 child.MakeMove(move);
 
@@ -413,11 +517,16 @@ public class ChessAI
                     );
 
 
+                if (searchTimedOut)
+                {
+                    return 0;
+                }
+
+
                 if (score >= beta)
                 {
                     return beta;
                 }
-
 
                 if (score > alpha)
                 {
@@ -430,15 +539,14 @@ public class ChessAI
         }
 
 
-        // -------------------------------------------------
+        // =================================================
         // MINIMIZING
-        // -----------------------------------------------------
+        // =================================================
 
         if (standPat <= alpha)
         {
             return alpha;
         }
-
 
         if (standPat < beta)
         {
@@ -446,32 +554,17 @@ public class ChessAI
         }
 
 
-        List<Move> blackMoves =
-            position.GetAllLegalMoves(
-                position.currentTurn
-            );
-
-
-        List<Move> blackTacticalMoves =
-            GetTacticalMoves(
-                position,
-                blackMoves
-            );
-
-
-        OrderMoves(
-            position,
-            blackTacticalMoves
-        );
-
-
-        foreach (Move move in blackTacticalMoves)
+        foreach (Move move in tacticalMoves)
         {
-            ChessEngine child =
-                CreateTestEngine(
-                    position
-                );
+            if (TimeExpired())
+            {
+                searchTimedOut = true;
+                return 0;
+            }
 
+
+            ChessEngine child =
+                CreateTestEngine(position);
 
             child.MakeMove(move);
 
@@ -486,11 +579,16 @@ public class ChessAI
                 );
 
 
+            if (searchTimedOut)
+            {
+                return 0;
+            }
+
+
             if (score <= alpha)
             {
                 return alpha;
             }
-
 
             if (score < beta)
             {
@@ -504,7 +602,7 @@ public class ChessAI
 
 
     // =====================================================
-    // GET TACTICAL MOVES
+    // TACTICAL MOVES
     // =====================================================
 
     private List<Move> GetTacticalMoves(
@@ -530,7 +628,6 @@ public class ChessAI
             }
 
 
-            // Every promotion is tactical.
             if (
                 move.Type ==
                 MoveType.Promotion
@@ -578,8 +675,7 @@ public class ChessAI
             );
 
 
-        return
-            !target.IsEmpty();
+        return !target.IsEmpty();
     }
 
 
@@ -593,7 +689,10 @@ public class ChessAI
     )
     {
         moves.Sort(
-            delegate (Move a, Move b)
+            delegate (
+                Move a,
+                Move b
+            )
             {
                 return
                     GetMoveScore(
@@ -610,10 +709,6 @@ public class ChessAI
     }
 
 
-    // =====================================================
-    // MOVE SCORE
-    // =====================================================
-
     private int GetMoveScore(
         ChessEngine position,
         Move move
@@ -622,10 +717,7 @@ public class ChessAI
         int score = 0;
 
 
-        // -------------------------------------------------
-        // PROMOTION
-        // -------------------------------------------------
-
+        // Promotion
         if (
             move.Type ==
             MoveType.Promotion
@@ -634,9 +726,7 @@ public class ChessAI
             score += 10000;
 
 
-            switch (
-                move.PromotionPiece
-            )
+            switch (move.PromotionPiece)
             {
                 case PieceType.Queen:
                     score += 900;
@@ -657,10 +747,7 @@ public class ChessAI
         }
 
 
-        // -------------------------------------------------
-        // CASTLING
-        // -------------------------------------------------
-
+        // Castling
         if (
             move.Type ==
             MoveType.CastleKingSide ||
@@ -672,10 +759,7 @@ public class ChessAI
         }
 
 
-        // -------------------------------------------------
-        // CAPTURE
-        // -------------------------------------------------
-
+        // Capture
         if (
             IsCapture(
                 position,
@@ -713,7 +797,6 @@ public class ChessAI
             }
 
 
-            // En passant gets a useful tactical bonus.
             if (
                 move.Type ==
                 MoveType.EnPassant
@@ -729,7 +812,7 @@ public class ChessAI
 
 
     // =====================================================
-    // PIECE VALUES FOR MOVE ORDERING
+    // PIECE VALUES
     // =====================================================
 
     private int GetPieceValue(
@@ -763,14 +846,305 @@ public class ChessAI
 
 
     // =====================================================
+    // DRAW CONTEMPT
+    // =====================================================
+
+    private int GetDrawScore(
+        ChessEngine position
+    )
+    {
+        int evaluation =
+            EvaluationFunction.Evaluate(
+                position.board
+            );
+
+
+        // White is better.
+        // Therefore a draw is bad for White.
+        if (evaluation > DrawContempt)
+        {
+            return -DrawContempt;
+        }
+
+
+        // Black is better.
+        // Therefore a draw is bad for Black.
+        if (evaluation < -DrawContempt)
+        {
+            return DrawContempt;
+        }
+
+
+        // Roughly equal position.
+        return 0;
+    }
+
+
+    // =====================================================
+    // SEARCH REPETITION HELPERS
+    // =====================================================
+
+    private bool IsSearchRepetition(
+        string positionKey
+    )
+    {
+        int count;
+
+        if (
+            searchRepetitions.TryGetValue(
+                positionKey,
+                out count
+            )
+        )
+        {
+            return count >= 2;
+        }
+
+
+        return false;
+    }
+
+
+    private void AddSearchRepetition(
+        string positionKey
+    )
+    {
+        int count;
+
+        if (
+            searchRepetitions.TryGetValue(
+                positionKey,
+                out count
+            )
+        )
+        {
+            searchRepetitions[positionKey] =
+                count + 1;
+        }
+        else
+        {
+            searchRepetitions[positionKey] = 1;
+        }
+    }
+
+
+    private void RemoveSearchRepetition(
+        string positionKey
+    )
+    {
+        int count;
+
+        if (
+            searchRepetitions.TryGetValue(
+                positionKey,
+                out count
+            )
+        )
+        {
+            if (count <= 1)
+            {
+                searchRepetitions.Remove(
+                    positionKey
+                );
+            }
+            else
+            {
+                searchRepetitions[positionKey] =
+                    count - 1;
+            }
+        }
+    }
+
+
+    // =====================================================
+    // POSITION KEY
+    // =====================================================
+
+    private string GetPositionKey(
+        ChessEngine position
+    )
+    {
+        System.Text.StringBuilder key =
+            new System.Text.StringBuilder();
+
+
+        // Board
+        for (
+            int square = 0;
+            square < 64;
+            square++
+        )
+        {
+            Piece piece =
+                position.board.GetPiece(
+                    square
+                );
+
+
+            if (piece.IsEmpty())
+            {
+                key.Append('.');
+            }
+            else
+            {
+                key.Append(
+                    (int)piece.type
+                );
+
+                key.Append(
+                    piece.color ==
+                    PieceColor.White
+                        ? 'w'
+                        : 'b'
+                );
+            }
+        }
+
+
+        // Side to move
+        key.Append(
+            position.currentTurn ==
+            PieceColor.White
+                ? 'W'
+                : 'B'
+        );
+
+
+        // Castling rights
+        key.Append(
+            position.whiteKingMoved
+                ? '1'
+                : '0'
+        );
+
+        key.Append(
+            position.blackKingMoved
+                ? '1'
+                : '0'
+        );
+
+        key.Append(
+            position.whiteKingsideRookMoved
+                ? '1'
+                : '0'
+        );
+
+        key.Append(
+            position.whiteQueensideRookMoved
+                ? '1'
+                : '0'
+        );
+
+        key.Append(
+            position.blackKingsideRookMoved
+                ? '1'
+                : '0'
+        );
+
+        key.Append(
+            position.blackQueensideRookMoved
+                ? '1'
+                : '0'
+        );
+
+
+        // En passant
+        key.Append('|');
+        key.Append(
+            position.enPassantSquare
+        );
+
+
+        return key.ToString();
+    }
+
+
+    // =====================================================
+    // MOVE TO FRONT
+    // =====================================================
+
+    private void MoveToFront(
+        List<Move> moves,
+        Move preferredMove
+    )
+    {
+        for (
+            int i = 0;
+            i < moves.Count;
+            i++
+        )
+        {
+            if (
+                SameMove(
+                    moves[i],
+                    preferredMove
+                )
+            )
+            {
+                if (i == 0)
+                {
+                    return;
+                }
+
+
+                Move temp =
+                    moves[0];
+
+                moves[0] =
+                    moves[i];
+
+                moves[i] =
+                    temp;
+
+                return;
+            }
+        }
+    }
+
+
+    // =====================================================
+    // MOVE COMPARISON
+    // =====================================================
+
+    private bool SameMove(
+        Move a,
+        Move b
+    )
+    {
+        return
+            a.From == b.From &&
+            a.To == b.To &&
+            a.Type == b.Type &&
+            a.PromotionPiece ==
+                b.PromotionPiece;
+    }
+
+
+    // =====================================================
+    // TIME CHECK
+    // =====================================================
+
+    private bool TimeExpired()
+    {
+        if (searchTimer == null)
+        {
+            return false;
+        }
+
+
+        return
+            searchTimer.ElapsedMilliseconds >=
+            ThinkTimeMilliseconds;
+    }
+
+
+    // =====================================================
     // CREATE TEST ENGINE
     // =====================================================
 
     private ChessEngine CreateTestEngine()
     {
-        return CreateTestEngine(
-            engine
-        );
+        return CreateTestEngine(engine);
     }
 
 
@@ -782,33 +1156,17 @@ public class ChessAI
             new ChessEngine();
 
 
-        // -------------------------------------------------
-        // BOARD
-        // -------------------------------------------------
-
         test.board =
             source.board.Copy();
 
-
-        // -------------------------------------------------
-        // TURN
-        // -------------------------------------------------
 
         test.currentTurn =
             source.currentTurn;
 
 
-        // -------------------------------------------------
-        // EN PASSANT
-        // -------------------------------------------------
-
         test.enPassantSquare =
             source.enPassantSquare;
 
-
-        // -------------------------------------------------
-        // CASTLING RIGHTS
-        // -------------------------------------------------
 
         test.whiteKingMoved =
             source.whiteKingMoved;

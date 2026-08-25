@@ -43,12 +43,12 @@ public class BoardView : MonoBehaviour
                 if ((file + rank) % 2 == 0)
                 {
                     image.color =
-                        new Color32(240, 217, 181, 255);
+                        new Color32(181, 136, 99, 255);
                 }
                 else
                 {
                     image.color =
-                        new Color32(181, 136, 99, 255);
+                        new Color32(240, 217, 181, 255);
                 }
 
                 square.name = GetSquareName(file, rank);
