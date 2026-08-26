@@ -19,26 +19,26 @@ public static class EvaluationFunction
     // MOBILITY
     // =====================================================
 
-    private const int MobilityWeight = 5;
+    private const int MobilityWeight = 4;
 
 
     // =====================================================
     // KING SAFETY
     // =====================================================
 
-    private const int KingAttackWeight = 15;
-    private const int PawnShieldWeight = 10;
-    private const int CheckPenalty = 100;
+    private const int KingAttackWeight = 18;
+    private const int PawnShieldWeight = 12;
+    private const int CheckPenalty = 120;
 
 
     // =====================================================
     // PAWN STRUCTURE
     // =====================================================
 
-    private const int DoubledPawnPenalty = 15;
-    private const int IsolatedPawnPenalty = 15;
-    private const int PassedPawnBonus = 25;
-    private const int ConnectedPawnBonus = 10;
+    private const int DoubledPawnPenalty = 12;
+    private const int IsolatedPawnPenalty = 12;
+    private const int PassedPawnBonus = 35;
+    private const int ConnectedPawnBonus = 8;
 
 
     // =====================================================

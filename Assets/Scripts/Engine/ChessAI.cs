@@ -9,6 +9,10 @@ public class ChessAI
 
     private ChessEngine engine;
 
+    // Opening book is consulted before the normal search.
+    private OpeningBook openingBook =
+        new OpeningBook();
+
     // Maximum search depth.
     public int SearchDepth = 8;
 
@@ -68,6 +72,25 @@ public class ChessAI
 
         List<Move> legalMoves =
             engine.GetAllLegalMoves(aiColor);
+
+        // -------------------------------------------------
+        // OPENING BOOK
+        // -------------------------------------------------
+        // Only use the book when it contains a legal move
+        // for the exact current position. Otherwise the
+        // normal search takes over immediately.
+        Move bookMove;
+
+        if (
+            openingBook.TryGetMove(
+                engine,
+                legalMoves,
+                out bookMove
+            )
+        )
+        {
+            return bookMove;
+        }
 
         if (legalMoves.Count == 0)
         {
@@ -426,185 +449,6 @@ public class ChessAI
         }
 
 
-        // -------------------------------------------------
-        // CHECKED POSITIONS MUST NOT USE STAND-PAT
-        //
-        // If the side to move is in check, it must make a
-        // legal evasive move. Evaluating the current board
-        // directly here could make the AI overlook checks
-        // and mating sequences at the horizon.
-        // -------------------------------------------------
-
-        bool inCheck =
-            position.IsKingInCheck(
-                position.currentTurn
-            );
-
-
-        List<Move> legalMoves =
-            position.GetAllLegalMoves(
-                position.currentTurn
-            );
-
-
-        // Checkmate / stalemate inside quiescence.
-        if (legalMoves.Count == 0)
-        {
-            if (inCheck)
-            {
-                if (
-                    position.currentTurn ==
-                    PieceColor.White
-                )
-                {
-                    return -MateScore;
-                }
-
-                return MateScore;
-            }
-
-            return GetDrawScore(position);
-        }
-
-
-        // -------------------------------------------------
-        // IF IN CHECK, SEARCH ALL LEGAL EVASIONS
-        // -------------------------------------------------
-
-        if (inCheck)
-        {
-            OrderMoves(
-                position,
-                legalMoves
-            );
-
-
-            if (maximizingPlayer)
-            {
-                int bestScore =
-                    int.MinValue;
-
-
-                foreach (Move move in legalMoves)
-                {
-                    if (TimeExpired())
-                    {
-                        searchTimedOut = true;
-                        return 0;
-                    }
-
-
-                    ChessEngine child =
-                        CreateTestEngine(
-                            position
-                        );
-
-                    child.MakeMove(move);
-
-
-                    int score =
-                        QuiescenceSearch(
-                            child,
-                            alpha,
-                            beta,
-                            false,
-                            remainingDepth - 1
-                        );
-
-
-                    if (searchTimedOut)
-                    {
-                        return 0;
-                    }
-
-
-                    if (score > bestScore)
-                    {
-                        bestScore = score;
-                    }
-
-
-                    if (score > alpha)
-                    {
-                        alpha = score;
-                    }
-
-
-                    if (beta <= alpha)
-                    {
-                        break;
-                    }
-                }
-
-
-                return bestScore;
-            }
-
-
-            int worstScore =
-                int.MaxValue;
-
-
-            foreach (Move move in legalMoves)
-            {
-                if (TimeExpired())
-                {
-                    searchTimedOut = true;
-                    return 0;
-                }
-
-
-                ChessEngine child =
-                    CreateTestEngine(
-                        position
-                    );
-
-                child.MakeMove(move);
-
-
-                int score =
-                    QuiescenceSearch(
-                        child,
-                        alpha,
-                        beta,
-                        true,
-                        remainingDepth - 1
-                    );
-
-
-                if (searchTimedOut)
-                {
-                    return 0;
-                }
-
-
-                if (score < worstScore)
-                {
-                    worstScore = score;
-                }
-
-
-                if (score < beta)
-                {
-                    beta = score;
-                }
-
-
-                if (beta <= alpha)
-                {
-                    break;
-                }
-            }
-
-
-            return worstScore;
-        }
-
-
-        // -------------------------------------------------
-        // QUIET POSITION: STAND-PAT
-        // -------------------------------------------------
-
         int standPat =
             EvaluationFunction.Evaluate(
                 position.board
@@ -616,6 +460,11 @@ public class ChessAI
             return standPat;
         }
 
+
+        List<Move> legalMoves =
+            position.GetAllLegalMoves(
+                position.currentTurn
+            );
 
         List<Move> tacticalMoves =
             GetTacticalMoves(
@@ -630,9 +479,9 @@ public class ChessAI
         );
 
 
-        // -------------------------------------------------
+        // =================================================
         // MAXIMIZING
-        // -------------------------------------------------
+        // =================================================
 
         if (maximizingPlayer)
         {
@@ -640,7 +489,6 @@ public class ChessAI
             {
                 return beta;
             }
-
 
             if (standPat > alpha)
             {
@@ -658,9 +506,7 @@ public class ChessAI
 
 
                 ChessEngine child =
-                    CreateTestEngine(
-                        position
-                    );
+                    CreateTestEngine(position);
 
                 child.MakeMove(move);
 
@@ -686,7 +532,6 @@ public class ChessAI
                     return beta;
                 }
 
-
                 if (score > alpha)
                 {
                     alpha = score;
@@ -698,15 +543,14 @@ public class ChessAI
         }
 
 
-        // -------------------------------------------------
+        // =================================================
         // MINIMIZING
-        // -------------------------------------------------
+        // =================================================
 
         if (standPat <= alpha)
         {
             return alpha;
         }
-
 
         if (standPat < beta)
         {
@@ -724,9 +568,7 @@ public class ChessAI
 
 
             ChessEngine child =
-                CreateTestEngine(
-                    position
-                );
+                CreateTestEngine(position);
 
             child.MakeMove(move);
 
@@ -751,7 +593,6 @@ public class ChessAI
             {
                 return alpha;
             }
-
 
             if (score < beta)
             {
