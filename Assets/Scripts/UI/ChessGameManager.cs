@@ -1,6 +1,9 @@
 using UnityEngine;
 using UnityEngine.UI;
 using System.Collections.Generic;
+using System.Text;
+using System;
+using UnityEngine.Serialization;
 
 public class ChessGameManager : MonoBehaviour
 {
@@ -29,7 +32,22 @@ public class ChessGameManager : MonoBehaviour
 
     [SerializeField] private GameObject blackPromotionPanel;
 
+    [Header("PGN Export")]
+    [FormerlySerializedAs("exportFENButton")]
+    [SerializeField] private Button exportPGNButton;
+
+    [Header("AI Suggestion")]
+    [SerializeField] private Button aiSuggestionButton;
+
+    // Complete game move history used to generate PGN.
+    private List<string> pgnMoves = new List<string>();
+
+    // Stores the SAN text for the most recent move before a promotion piece
+    // is selected. Promotion is completed through the promotion UI.
+    private string pendingPromotionSAN = null;
+
     private ChessEngine engine;
+
     private ChessAI chessAI;
 
     // Currently selected piece
@@ -76,6 +94,18 @@ public class ChessGameManager : MonoBehaviour
     {
         engine = new ChessEngine();
 
+        if (exportPGNButton != null)
+        {
+            exportPGNButton.onClick.AddListener(ExportPGNToClipboard);
+        }
+
+        if (aiSuggestionButton != null)
+        {
+            aiSuggestionButton.onClick.AddListener(
+                SuggestBestMove
+            );
+        }
+
         currentTurn = PieceColor.White;
         enPassantSquare = -1;
 
@@ -91,7 +121,7 @@ public class ChessGameManager : MonoBehaviour
         SyncEngineState();
 
         chessAI = new ChessAI(engine);
-        chessAI.SearchDepth = 3;
+        chessAI.SearchDepth = 10;
 
         RecordPosition();
         UpdatePositionHash();
@@ -118,6 +148,192 @@ public class ChessGameManager : MonoBehaviour
             blackKingsideRookMoved;
         engine.blackQueensideRookMoved =
             blackQueensideRookMoved;
+    }
+
+    // =====================================================
+    // PGN EXPORT
+    // =====================================================
+
+    public string GetCurrentPGN()
+    {
+        StringBuilder pgn = new StringBuilder();
+
+        string result = GetPGNResult();
+
+        pgn.AppendLine("[Event \"Unity Chess Game\"]");
+        pgn.AppendLine("[Site \"Local\"]");
+        pgn.AppendLine("[Date \"" + DateTime.Now.ToString("yyyy.MM.dd") + "\"]");
+        pgn.AppendLine("[Round \"-\"]");
+        pgn.AppendLine("[White \"White\"]");
+        pgn.AppendLine("[Black \"Black\"]");
+        pgn.AppendLine("[Result \"" + result + "\"]");
+        pgn.AppendLine();
+
+        for (int i = 0; i < pgnMoves.Count; i++)
+        {
+            if (i % 2 == 0)
+            {
+                pgn.Append((i / 2 + 1) + ". ");
+            }
+
+            pgn.Append(pgnMoves[i]);
+
+            if (i < pgnMoves.Count - 1)
+                pgn.Append(" ");
+        }
+
+        if (pgnMoves.Count > 0)
+            pgn.Append(" ");
+
+        pgn.Append(result);
+
+        return pgn.ToString();
+    }
+
+    public void ExportPGNToClipboard()
+    {
+        string pgn = GetCurrentPGN();
+
+        GUIUtility.systemCopyBuffer = pgn;
+
+        Debug.Log("PGN copied to clipboard:\n" + pgn);
+    }
+
+    private string GetPGNResult()
+    {
+        if (currentGameState == GameState.Checkmate)
+        {
+            // currentTurn is the player who has been checkmated.
+            return currentTurn == PieceColor.White ? "0-1" : "1-0";
+        }
+
+        if (gameOver)
+            return "1/2-1/2";
+
+        return "*";
+    }
+
+    // Creates Standard Algebraic Notation (SAN) for a move.
+    // This is called before the move is made, so the original board
+    // position is still available for captures and disambiguation.
+    private string BuildSANBeforeMove(Move move, Piece movingPiece, bool isCapture)
+    {
+        if (move.Type == MoveType.CastleKingSide)
+            return "O-O";
+
+        if (move.Type == MoveType.CastleQueenSide)
+            return "O-O-O";
+
+        StringBuilder san = new StringBuilder();
+
+        bool isPawn = movingPiece.type == PieceType.Pawn;
+
+        if (!isPawn)
+        {
+            san.Append(GetSANPieceLetter(movingPiece.type));
+
+            // SAN disambiguation: if another same-type piece can legally
+            // reach the same destination, include file and/or rank.
+            List<Move> allLegalMoves = engine.GetAllLegalMoves(currentTurn);
+
+            bool anotherSamePieceCanMove = false;
+            bool anotherSamePieceSameFile = false;
+            bool anotherSamePieceSameRank = false;
+
+            foreach (Move candidate in allLegalMoves)
+            {
+                if (candidate.From == move.From ||
+                    candidate.To != move.To)
+                    continue;
+
+                Piece candidatePiece =
+                    engine.board.GetPiece(candidate.From);
+
+                if (candidatePiece.type != movingPiece.type ||
+                    candidatePiece.color != movingPiece.color)
+                    continue;
+
+                anotherSamePieceCanMove = true;
+
+                if (candidate.From % 8 == move.From % 8)
+                    anotherSamePieceSameFile = true;
+
+                if (candidate.From / 8 == move.From / 8)
+                    anotherSamePieceSameRank = true;
+            }
+
+            if (anotherSamePieceCanMove)
+            {
+                char fromFile = (char)('a' + (move.From % 8));
+                char fromRank = (char)('1' + (move.From / 8));
+
+                if (!anotherSamePieceSameFile)
+                    san.Append(fromFile);
+                else if (!anotherSamePieceSameRank)
+                    san.Append(fromRank);
+                else
+                    san.Append(fromFile).Append(fromRank);
+            }
+        }
+        else if (isCapture)
+        {
+            // Pawn captures include the originating file.
+            san.Append((char)('a' + (move.From % 8)));
+        }
+
+        if (isCapture)
+            san.Append('x');
+
+        san.Append(GetSquareName(move.To));
+
+        // Promotion is handled later by PromoteTo(), because the
+        // promotion UI chooses the final piece after the pawn move.
+        if (move.Type == MoveType.Promotion)
+        {
+            pendingPromotionSAN = san.ToString();
+        }
+
+        return san.ToString();
+    }
+
+    private char GetSANPieceLetter(PieceType type)
+    {
+        switch (type)
+        {
+            case PieceType.King:
+                return 'K';
+
+            case PieceType.Queen:
+                return 'Q';
+
+            case PieceType.Rook:
+                return 'R';
+
+            case PieceType.Bishop:
+                return 'B';
+
+            case PieceType.Knight:
+                return 'N';
+        }
+
+        return '?';
+    }
+
+    private string AddCheckSuffix(string san)
+    {
+        // After a normal move, currentTurn has already switched to the
+        // opponent. Check the resulting position.
+        SyncEngineState();
+
+        GameState state = engine.GetGameState();
+
+        if (state == GameState.Checkmate)
+            return san + "#";
+
+        if (state == GameState.Check)
+            return san + "+";
+
+        return san;
     }
 
     private void UpdatePositionHash()
@@ -321,30 +537,96 @@ public class ChessGameManager : MonoBehaviour
     }
 
     // =====================================================
-    // AI TEST
+    // AI SUGGESTION
     // =====================================================
 
-    public void TestAIMove()
+    public void SuggestBestMove()
     {
         if (gameOver)
         {
-            Debug.Log("AI test skipped: game is over.");
+            Debug.Log(
+                "AI suggestion skipped: game is over."
+            );
+            return;
+        }
+
+        if (chessAI == null)
+        {
+            Debug.LogError(
+                "AI Suggestion failed: ChessAI is not initialized."
+            );
+            return;
+        }
+
+        if (waitingForPromotion)
+        {
+            Debug.Log(
+                "AI suggestion skipped: waiting for promotion."
+            );
             return;
         }
 
         SyncEngineState();
+        ClearMoveHints();
 
         Move bestMove =
             chessAI.FindBestMove();
 
+        if (
+            bestMove.From < 0 ||
+            bestMove.From >= 64 ||
+            bestMove.To < 0 ||
+            bestMove.To >= 64
+        )
+        {
+            Debug.Log(
+                "AI Suggestion: No legal move available."
+            );
+            return;
+        }
+
+        // Show the suggested move first.
+        if (
+            squareViews.TryGetValue(
+                bestMove.From,
+                out SquareView fromView
+            )
+        )
+        {
+            fromView.ShowMoveHint();
+        }
+
+        if (
+            squareViews.TryGetValue(
+                bestMove.To,
+                out SquareView toView
+            )
+        )
+        {
+            toView.ShowMoveHint();
+        }
+
         Debug.Log(
-            "AI selected: " +
+            "AI Suggestion: " +
             GetSquareName(bestMove.From) +
             " -> " +
             GetSquareName(bestMove.To) +
             " | Type: " +
             bestMove.Type
         );
+
+        // -------------------------------------------------
+        // EXECUTE THE SUGGESTED MOVE
+        // -------------------------------------------------
+        //
+        // Use the existing move pipeline instead of directly
+        // changing the board. This keeps the engine state,
+        // visuals, PGN, captures, castling, en-passant,
+        // promotion and undo handling synchronized.
+        //
+
+        SelectPiece(bestMove.From);
+        SelectDestination(bestMove.To);
     }
 
 
@@ -628,6 +910,14 @@ public class ChessGameManager : MonoBehaviour
 
         bool wasCapture = !engine.board.GetPiece(square).IsEmpty();
 
+        // Build SAN while the board is still in the position before the move.
+        string sanMove =
+            BuildSANBeforeMove(
+                move,
+                movingPiece,
+                wasCapture || move.Type == MoveType.EnPassant
+            );
+
         SaveMoveState(move);
         // Update internal board
         engine.board.MakeMove(move);
@@ -722,6 +1012,18 @@ public class ChessGameManager : MonoBehaviour
 
         // Switch player
         SwitchTurn();
+
+        // Promotion is completed by the promotion UI, so temporarily
+        // keep its SAN until PromoteTo() supplies =Q/=R/=B/=N.
+        if (move.Type == MoveType.Promotion)
+        {
+            pgnMoves.Add(sanMove);
+            pendingPromotionSAN = sanMove;
+        }
+        else
+        {
+            pgnMoves.Add(AddCheckSuffix(sanMove));
+        }
 
         UpdatePositionHash();
 
@@ -1004,6 +1306,12 @@ public class ChessGameManager : MonoBehaviour
         MoveState state =
             moveHistory.Pop();
 
+        // Undo the corresponding PGN move as well.
+        if (pgnMoves.Count > 0)
+            pgnMoves.RemoveAt(pgnMoves.Count - 1);
+
+        pendingPromotionSAN = null;
+
 
         Move move =
             state.move;
@@ -1099,6 +1407,9 @@ public class ChessGameManager : MonoBehaviour
             state.previousTurn;
 
         SyncEngineState();
+
+        currentGameState =
+            engine.GetGameState();
 
 
         gameOver =
@@ -1251,6 +1562,34 @@ public class ChessGameManager : MonoBehaviour
 
 
         waitingForPromotion = false;
+
+        // Complete the pending SAN promotion notation.
+        if (!string.IsNullOrEmpty(pendingPromotionSAN) &&
+            pgnMoves.Count > 0)
+        {
+            char promotionLetter =
+                GetSANPieceLetter(type);
+
+            string completedSAN =
+                pendingPromotionSAN +
+                "=" +
+                promotionLetter;
+
+            SyncEngineState();
+
+            GameState resultingState =
+                engine.GetGameState();
+
+            if (resultingState == GameState.Checkmate)
+                completedSAN += "#";
+            else if (resultingState == GameState.Check)
+                completedSAN += "+";
+
+            pgnMoves[pgnMoves.Count - 1] =
+                completedSAN;
+
+            pendingPromotionSAN = null;
+        }
 
         Debug.Log(
             "Promoted to " + type

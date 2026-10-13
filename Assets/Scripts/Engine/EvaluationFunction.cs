@@ -32,6 +32,476 @@ public static class EvaluationFunction
 
 
     // =====================================================
+    // ENDGAME EVALUATION
+    // =====================================================
+
+    private static int EvaluateEndgame(
+        Board board
+    )
+    {
+        int nonPawnMaterial = 0;
+
+        int whitePawns = 0;
+        int blackPawns = 0;
+
+        int whiteKingSquare = -1;
+        int blackKingSquare = -1;
+
+        int whiteRooks = 0;
+        int blackRooks = 0;
+
+        int whiteQueens = 0;
+        int blackQueens = 0;
+
+
+        for (
+            int square = 0;
+            square < Board.SquareCount;
+            square++
+        )
+        {
+            Piece piece =
+                board.GetPiece(square);
+
+
+            if (piece.IsEmpty())
+            {
+                continue;
+            }
+
+
+            switch (piece.type)
+            {
+                case PieceType.Pawn:
+
+                    if (
+                        piece.color ==
+                        PieceColor.White
+                    )
+                    {
+                        whitePawns++;
+                    }
+                    else
+                    {
+                        blackPawns++;
+                    }
+
+                    break;
+
+
+                case PieceType.King:
+
+                    if (
+                        piece.color ==
+                        PieceColor.White
+                    )
+                    {
+                        whiteKingSquare =
+                            square;
+                    }
+                    else
+                    {
+                        blackKingSquare =
+                            square;
+                    }
+
+                    break;
+
+
+                case PieceType.Rook:
+
+                    nonPawnMaterial +=
+                        RookValue;
+
+                    if (
+                        piece.color ==
+                        PieceColor.White
+                    )
+                    {
+                        whiteRooks++;
+                    }
+                    else
+                    {
+                        blackRooks++;
+                    }
+
+                    break;
+
+
+                case PieceType.Queen:
+
+                    nonPawnMaterial +=
+                        QueenValue;
+
+                    if (
+                        piece.color ==
+                        PieceColor.White
+                    )
+                    {
+                        whiteQueens++;
+                    }
+                    else
+                    {
+                        blackQueens++;
+                    }
+
+                    break;
+
+
+                case PieceType.Bishop:
+                    nonPawnMaterial +=
+                        BishopValue;
+                    break;
+
+
+                case PieceType.Knight:
+                    nonPawnMaterial +=
+                        KnightValue;
+                    break;
+            }
+        }
+
+
+        // -------------------------------------------------
+        // ENDGAME THRESHOLD
+        //
+        // Kings + pawns only, or very low remaining
+        // non-pawn material.
+        // -------------------------------------------------
+
+        bool endgame =
+            nonPawnMaterial <= 1800;
+
+
+        if (!endgame)
+        {
+            return 0;
+        }
+
+
+        int score = 0;
+
+
+        // -------------------------------------------------
+        // KING ACTIVITY
+        // -------------------------------------------------
+
+        if (
+            whiteKingSquare != -1 &&
+            blackKingSquare != -1
+        )
+        {
+            int whiteCentralization =
+                KingCentralization(
+                    whiteKingSquare
+                );
+
+            int blackCentralization =
+                KingCentralization(
+                    blackKingSquare
+                );
+
+
+            score +=
+                (
+                    whiteCentralization -
+                    blackCentralization
+                )
+                * EndgameKingActivityWeight;
+        }
+
+
+        // -------------------------------------------------
+        // PASSED PAWN ADVANCEMENT
+        //
+        // Existing passed-pawn bonus is retained.
+        // This adds extra value as the pawn approaches
+        // promotion, but only in the endgame.
+        // -------------------------------------------------
+
+        score +=
+            EvaluatePassedPawnAdvancement(
+                board,
+                PieceColor.White
+            );
+
+        score -=
+            EvaluatePassedPawnAdvancement(
+                board,
+                PieceColor.Black
+            );
+
+
+        // -------------------------------------------------
+        // ROOK ON SEVENTH / SECOND RANK
+        // -------------------------------------------------
+
+        if (
+            whiteRooks > 0
+        )
+        {
+            score +=
+                CountRooksOnSeventh(
+                    board,
+                    PieceColor.White
+                )
+                * EndgameRookOnSeventhBonus;
+        }
+
+
+        if (
+            blackRooks > 0
+        )
+        {
+            score -=
+                CountRooksOnSeventh(
+                    board,
+                    PieceColor.Black
+                )
+                * EndgameRookOnSeventhBonus;
+        }
+
+
+        // -------------------------------------------------
+        // QUEEN ACTIVITY
+        //
+        // Very small weight: queens still need activity,
+        // but we do not want this to overpower material.
+        // -------------------------------------------------
+
+        if (
+            whiteQueens > 0
+        )
+        {
+            score +=
+                CountQueenActivity(
+                    board,
+                    PieceColor.White
+                )
+                * EndgameQueenActivityWeight;
+        }
+
+
+        if (
+            blackQueens > 0
+        )
+        {
+            score -=
+                CountQueenActivity(
+                    board,
+                    PieceColor.Black
+                )
+                * EndgameQueenActivityWeight;
+        }
+
+
+        return score;
+    }
+
+
+    private static int KingCentralization(
+        int square
+    )
+    {
+        int file =
+            square % 8;
+
+        int rank =
+            square / 8;
+
+
+        // Distance from the center four squares.
+        int fileDistance =
+            Math.Abs(
+                file - 3
+            );
+
+        int rankDistance =
+            Math.Abs(
+                rank - 3
+            );
+
+
+        int distance =
+            fileDistance +
+            rankDistance;
+
+
+        return
+            6 - distance;
+    }
+
+
+    private static int EvaluatePassedPawnAdvancement(
+        Board board,
+        PieceColor color
+    )
+    {
+        int score = 0;
+
+
+        for (
+            int square = 0;
+            square < Board.SquareCount;
+            square++
+        )
+        {
+            Piece piece =
+                board.GetPiece(square);
+
+
+            if (
+                piece.IsEmpty() ||
+                piece.type != PieceType.Pawn ||
+                piece.color != color
+            )
+            {
+                continue;
+            }
+
+
+            int file =
+                square % 8;
+
+            int rank =
+                square / 8;
+
+
+            if (
+                !IsPassedPawn(
+                    board,
+                    file,
+                    rank,
+                    color
+                )
+            )
+            {
+                continue;
+            }
+
+
+            int advancement;
+
+            if (
+                color ==
+                PieceColor.White
+            )
+            {
+                advancement =
+                    rank;
+            }
+            else
+            {
+                advancement =
+                    7 - rank;
+            }
+
+
+            // Only reward advanced passed pawns.
+            if (advancement >= 4)
+            {
+                score +=
+                    (
+                        advancement - 3
+                    )
+                    * EndgamePassedPawnRankBonus;
+            }
+        }
+
+
+        return score;
+    }
+
+
+    private static int CountRooksOnSeventh(
+        Board board,
+        PieceColor color
+    )
+    {
+        int count = 0;
+
+        int targetRank =
+            color == PieceColor.White
+                ? 6
+                : 1;
+
+
+        for (
+            int file = 0;
+            file < 8;
+            file++
+        )
+        {
+            int square =
+                targetRank * 8 +
+                file;
+
+
+            Piece piece =
+                board.GetPiece(square);
+
+
+            if (
+                !piece.IsEmpty() &&
+                piece.type == PieceType.Rook &&
+                piece.color == color
+            )
+            {
+                count++;
+            }
+        }
+
+
+        return count;
+    }
+
+
+    private static int CountQueenActivity(
+        Board board,
+        PieceColor color
+    )
+    {
+        int score = 0;
+
+
+        for (
+            int square = 0;
+            square < Board.SquareCount;
+            square++
+        )
+        {
+            Piece piece =
+                board.GetPiece(square);
+
+
+            if (
+                piece.IsEmpty() ||
+                piece.type != PieceType.Queen ||
+                piece.color != color
+            )
+            {
+                continue;
+            }
+
+
+            List<Move> moves =
+                MoveGenerator.GenerateMoves(
+                    board,
+                    square,
+                    -1
+                );
+
+
+            score +=
+                moves.Count;
+        }
+
+
+        return score;
+    }
+
+
+    // =====================================================
     // PAWN STRUCTURE
     // =====================================================
 
@@ -39,6 +509,19 @@ public static class EvaluationFunction
     private const int IsolatedPawnPenalty = 12;
     private const int PassedPawnBonus = 35;
     private const int ConnectedPawnBonus = 8;
+
+
+    // =====================================================
+    // ENDGAME
+    // =====================================================
+
+    // When enough material has disappeared, the king should
+    // become an active piece and passed pawns become more
+    // important.
+    private const int EndgameKingActivityWeight = 6;
+    private const int EndgamePassedPawnRankBonus = 8;
+    private const int EndgameRookOnSeventhBonus = 12;
+    private const int EndgameQueenActivityWeight = 2;
 
 
     // =====================================================
@@ -210,6 +693,16 @@ public static class EvaluationFunction
 
         score +=
             EvaluatePawnStructure(
+                board
+            );
+
+
+        // -------------------------------------------------
+        // ENDGAME EVALUATION
+        // -------------------------------------------------
+
+        score +=
+            EvaluateEndgame(
                 board
             );
 

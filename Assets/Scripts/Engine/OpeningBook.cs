@@ -22,6 +22,11 @@ public class OpeningBook
     private Dictionary<string, List<BookCandidate>> book =
         new Dictionary<string, List<BookCandidate>>();
 
+    // Randomized only for opening-book choice. The actual
+    // search remains deterministic once the book ends.
+    private static readonly Random random =
+        new Random();
+
 
     // Standard opening book depth.
     // The supplied lines contain roughly the first
@@ -94,9 +99,9 @@ public class OpeningBook
         }
 
 
-        // Deterministic weighted selection.
-        // This gives variety while keeping games reproducible
-        // for benchmarking.
+        // Weighted random selection.
+        // This keeps stronger book moves more likely while
+        // allowing different games to start differently.
         int totalWeight = 0;
 
         foreach (
@@ -113,9 +118,9 @@ public class OpeningBook
 
 
         int selector =
-            Math.Abs(
-                key.GetHashCode()
-            ) % totalWeight;
+            random.Next(
+                totalWeight
+            );
 
 
         foreach (

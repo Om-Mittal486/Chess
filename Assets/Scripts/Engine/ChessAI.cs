@@ -14,7 +14,7 @@ public class ChessAI
         new OpeningBook();
 
     // Maximum search depth.
-    public int SearchDepth = 8;
+    public int SearchDepth = 10;
 
     // Maximum thinking time.
     public int ThinkTimeMilliseconds = 1500;
@@ -449,6 +449,224 @@ public class ChessAI
         }
 
 
+        // -------------------------------------------------
+        // CHECKED POSITION
+        //
+        // A checked side cannot use stand-pat. It must first
+        // search its legal evasions. This is important for
+        // finding forcing checks, captures and mates near
+        // the search horizon.
+        // -------------------------------------------------
+
+        bool inCheck =
+            position.IsKingInCheck(
+                position.currentTurn
+            );
+
+
+        List<Move> legalMoves =
+            position.GetAllLegalMoves(
+                position.currentTurn
+            );
+
+
+        if (legalMoves.Count == 0)
+        {
+            if (inCheck)
+            {
+                if (
+                    position.currentTurn ==
+                    PieceColor.White
+                )
+                {
+                    return -MateScore;
+                }
+
+                return MateScore;
+            }
+
+            return GetDrawScore(position);
+        }
+
+
+        if (inCheck)
+        {
+            OrderMoves(
+                position,
+                legalMoves
+            );
+
+
+            if (maximizingPlayer)
+            {
+                int bestScore =
+                    int.MinValue;
+
+
+                foreach (Move move in legalMoves)
+                {
+                    if (TimeExpired())
+                    {
+                        searchTimedOut = true;
+                        return 0;
+                    }
+
+
+                    ChessEngine child =
+                        CreateTestEngine(
+                            position
+                        );
+
+                    child.MakeMove(move);
+
+
+                    string childKey =
+                        GetPositionKey(child);
+
+                    int score;
+
+
+                    if (IsSearchRepetition(childKey))
+                    {
+                        score =
+                            GetDrawScore(child);
+                    }
+                    else
+                    {
+                        AddSearchRepetition(
+                            childKey
+                        );
+
+                        score =
+                            QuiescenceSearch(
+                                child,
+                                alpha,
+                                beta,
+                                false,
+                                remainingDepth - 1
+                            );
+
+                        RemoveSearchRepetition(
+                            childKey
+                        );
+                    }
+
+
+                    if (searchTimedOut)
+                    {
+                        return 0;
+                    }
+
+
+                    if (score > bestScore)
+                    {
+                        bestScore = score;
+                    }
+
+
+                    if (score > alpha)
+                    {
+                        alpha = score;
+                    }
+
+
+                    if (beta <= alpha)
+                    {
+                        break;
+                    }
+                }
+
+
+                return bestScore;
+            }
+
+
+            int worstScore =
+                int.MaxValue;
+
+
+            foreach (Move move in legalMoves)
+            {
+                if (TimeExpired())
+                {
+                    searchTimedOut = true;
+                    return 0;
+                }
+
+
+                ChessEngine child =
+                    CreateTestEngine(
+                        position
+                    );
+
+                child.MakeMove(move);
+
+
+                string childKey =
+                    GetPositionKey(child);
+
+                int score;
+
+
+                if (IsSearchRepetition(childKey))
+                {
+                    score =
+                        GetDrawScore(child);
+                }
+                else
+                {
+                    AddSearchRepetition(
+                        childKey
+                    );
+
+                    score =
+                        QuiescenceSearch(
+                            child,
+                            alpha,
+                            beta,
+                            true,
+                            remainingDepth - 1
+                        );
+
+                    RemoveSearchRepetition(
+                        childKey
+                    );
+                }
+
+
+                if (searchTimedOut)
+                {
+                    return 0;
+                }
+
+
+                if (score < worstScore)
+                {
+                    worstScore = score;
+                }
+
+
+                if (score < beta)
+                {
+                    beta = score;
+                }
+
+
+                if (beta <= alpha)
+                {
+                    break;
+                }
+            }
+
+
+            return worstScore;
+        }
+
+
+        // -------------------------------------------------
+        // NORMAL QUIET POSITION
+        // -------------------------------------------------
+
         int standPat =
             EvaluationFunction.Evaluate(
                 position.board
@@ -460,11 +678,6 @@ public class ChessAI
             return standPat;
         }
 
-
-        List<Move> legalMoves =
-            position.GetAllLegalMoves(
-                position.currentTurn
-            );
 
         List<Move> tacticalMoves =
             GetTacticalMoves(
@@ -479,9 +692,9 @@ public class ChessAI
         );
 
 
-        // =================================================
+        // -------------------------------------------------
         // MAXIMIZING
-        // =================================================
+        // -------------------------------------------------
 
         if (maximizingPlayer)
         {
@@ -489,6 +702,7 @@ public class ChessAI
             {
                 return beta;
             }
+
 
             if (standPat > alpha)
             {
@@ -506,19 +720,43 @@ public class ChessAI
 
 
                 ChessEngine child =
-                    CreateTestEngine(position);
+                    CreateTestEngine(
+                        position
+                    );
 
                 child.MakeMove(move);
 
 
-                int score =
-                    QuiescenceSearch(
-                        child,
-                        alpha,
-                        beta,
-                        false,
-                        remainingDepth - 1
+                string childKey =
+                    GetPositionKey(child);
+
+                int score;
+
+
+                if (IsSearchRepetition(childKey))
+                {
+                    score =
+                        GetDrawScore(child);
+                }
+                else
+                {
+                    AddSearchRepetition(
+                        childKey
                     );
+
+                    score =
+                        QuiescenceSearch(
+                            child,
+                            alpha,
+                            beta,
+                            false,
+                            remainingDepth - 1
+                        );
+
+                    RemoveSearchRepetition(
+                        childKey
+                    );
+                }
 
 
                 if (searchTimedOut)
@@ -532,6 +770,7 @@ public class ChessAI
                     return beta;
                 }
 
+
                 if (score > alpha)
                 {
                     alpha = score;
@@ -543,14 +782,15 @@ public class ChessAI
         }
 
 
-        // =================================================
+        // -------------------------------------------------
         // MINIMIZING
-        // =================================================
+        // -------------------------------------------------
 
         if (standPat <= alpha)
         {
             return alpha;
         }
+
 
         if (standPat < beta)
         {
@@ -568,19 +808,43 @@ public class ChessAI
 
 
             ChessEngine child =
-                CreateTestEngine(position);
+                CreateTestEngine(
+                    position
+                );
 
             child.MakeMove(move);
 
 
-            int score =
-                QuiescenceSearch(
-                    child,
-                    alpha,
-                    beta,
-                    true,
-                    remainingDepth - 1
+            string childKey =
+                GetPositionKey(child);
+
+            int score;
+
+
+            if (IsSearchRepetition(childKey))
+            {
+                score =
+                    GetDrawScore(child);
+            }
+            else
+            {
+                AddSearchRepetition(
+                    childKey
                 );
+
+                score =
+                    QuiescenceSearch(
+                        child,
+                        alpha,
+                        beta,
+                        true,
+                        remainingDepth - 1
+                    );
+
+                RemoveSearchRepetition(
+                    childKey
+                );
+            }
 
 
             if (searchTimedOut)
@@ -593,6 +857,7 @@ public class ChessAI
             {
                 return alpha;
             }
+
 
             if (score < beta)
             {
